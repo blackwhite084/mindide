@@ -532,3 +532,75 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .recent-dir:hover .icon { visibility: visible; }
 .source-bash { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin-top: 2px; cursor: pointer; }
 .source-bash input { margin: 0; }
+
+/* ---------- 分组 ---------- */
+.react-flow__node-group {
+  padding: 0;
+  width: auto;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  text-align: left;
+  font-size: inherit;
+  color: inherit;
+  /* 拖动分组时里面的卡片不需要过渡动画以外的东西；框的尺寸变化也跟着过渡 */
+  transition: transform 0.38s cubic-bezier(0.2, 0.7, 0.2, 1), width 0.25s ease, height 0.25s ease;
+}
+.react-flow__node-group.dragging { transition: none; }
+.groupnode {
+  --c: var(--line-2);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1.5px solid color-mix(in srgb, var(--c) 38%, transparent);
+  background: color-mix(in srgb, var(--c) 6%, transparent);
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.groupnode.drop-target {
+  border-color: var(--ai);
+  box-shadow: 0 0 0 2px rgba(158, 206, 106, 0.35), 0 0 30px rgba(158, 206, 106, 0.12);
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px 0 8px;
+  cursor: grab;
+  border-bottom: 1px solid color-mix(in srgb, var(--c) 18%, transparent);
+}
+.react-flow__node-group.dragging .group-head { cursor: grabbing; }
+.group-head .icon { padding: 0 5px; background: transparent; border: none; color: var(--muted); font-size: 12px; }
+.group-head .icon:hover { color: var(--text); background: var(--node-2); }
+.group-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: color-mix(in srgb, var(--c) 70%, var(--text));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.group-title-input {
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  width: 180px;
+  padding: 2px 6px;
+  color: var(--text);
+  background: var(--node);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  outline: none;
+}
+.group-count { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.group-body { flex: 1; display: flex; align-items: center; justify-content: center; }
+.group-empty { font-size: 12.5px; color: var(--muted); }
+
+/* 折叠：一张小卡片 */
+.groupnode.folded { width: 280px; background: color-mix(in srgb, var(--c) 10%, var(--node)); box-shadow: 0 3px 14px rgba(0, 0, 0, 0.22); }
+.groupnode.folded .group-head { border-bottom-color: transparent; }
+.group-preview { padding: 0 14px 12px 32px; cursor: pointer; }
+.group-topic { font-size: 12.5px; line-height: 1.7; color: #c3c9d2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-more { font-size: 12px; line-height: 1.7; color: var(--muted); }

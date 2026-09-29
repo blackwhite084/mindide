@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
-import type { Board, BoardEdge, BoardNode, ChatEntry, EdgePatch, EditField, ServerMsg, Task } from "./types.ts";
+import type { Board, BoardEdge, BoardGroup, BoardNode, ChatEntry, EdgePatch, EditField, GroupPatch, ServerMsg, Task } from "./types.ts";
 import { codeHash } from "./widget.ts";
 
 type Listener = (msg: ServerMsg) => void;
 
 /** 白板状态 + 持久化 + 变更广播 */
 export class BoardStore {
-  board: Board = { nodes: [], edges: [], chat: [] };
+  board: Board = { nodes: [], edges: [], groups: [], chat: [] };
   tasks = new Map<string, Task>();
   private listeners = new Set<Listener>();
   private saveTimer: NodeJS.Timeout | undefined;
@@ -70,6 +70,22 @@ export class BoardStore {
     return this.board.nodes.filter((n) => n.parentId === id);
   }
 
+  /** 所在主题（根节点） */
+  rootOf(id: string) {
+    let n = this.get(id);
+    while (n?.parentId) {
+      const p = this.get(n.parentId);
+      if (!p) break;
+      n = p;
+    }
+    return n;
+  }
+
+  /** 节点所在的分组：由它所在的主题决定 */
+  groupOf(id: string) {
+    return this.rootOf(id)?.groupId;
+  }
+
   isDescendant(id: string, ancestorId: string): boolean {
     for (let n = this.get(id); n?.parentId; n = this.get(n.parentId)) {
       if (n.parentId === ancestorId) return true;
@@ -96,6 +112,7 @@ export class BoardStore {
       ...init,
     };
     if (node.parentId && !this.get(node.parentId)) node.parentId = null;
+    if (node.parentId || (node.groupId && !this.getGroup(node.groupId))) delete node.groupId;
     this.board.nodes.push(node);
     this.emit({ type: "node:upsert", node, animate: animate ? "create" : undefined });
     return node;
@@ -110,9 +127,28 @@ export class BoardStore {
         delete patch.parentId;
       }
     }
+    const groupBefore = this.groupOf(id);
+    // 主题从树上断开时留在原来的分组；挂到别的节点下则跟随新的主题
+    if (patch.parentId === null && node.parentId && !("groupId" in patch)) patch.groupId = groupBefore;
     Object.assign(node, patch, { updatedAt: Date.now() });
+    if (node.parentId || !node.groupId || !this.getGroup(node.groupId)) delete node.groupId;
+    // 换了分组：原来固定的位置是相对旧分组的，不再有意义
+    if (this.groupOf(id) !== groupBefore) {
+      if (patch.x === undefined) node.pinned = false;
+      this.unpinDescendants(id);
+    }
     this.emit({ type: "node:upsert", node });
     return node;
+  }
+
+  private unpinDescendants(id: string) {
+    for (const c of this.children(id)) {
+      if (c.pinned) {
+        c.pinned = false;
+        this.emit({ type: "node:upsert", node: c });
+      }
+      this.unpinDescendants(c.id);
+    }
   }
 
   /** 整体替换内容并触发前端的差异动画 */
@@ -138,6 +174,86 @@ export class BoardStore {
     this.board.edges = this.board.edges.filter((e) => e.source !== id && e.target !== id);
     for (const e of removed) this.emit({ type: "edge:delete", id: e.id });
     this.emit({ type: "node:delete", id });
+  }
+
+  // ---------- 分组 ----------
+
+  getGroup(id: string) {
+    return this.board.groups.find((g) => g.id === id);
+  }
+
+  resolveGroup(idOrPrefix: string) {
+    return this.getGroup(idOrPrefix) ?? this.board.groups.find((g) => g.id.startsWith(idOrPrefix));
+  }
+
+  /** 新建分组并装入节点；pos 给出时分组固定在那里，否则参与自动排列 */
+  createGroup(init: { id?: string; title: string; nodeIds?: string[]; pos?: { x: number; y: number } }): BoardGroup {
+    const ids = this.topMost(init.nodeIds ?? []);
+    // 自动排列时放在成员原来所在主题的位置上，而不是排到最后
+    const orders = ids.map((id) => this.rootOf(id)!.createdAt);
+    const now = Date.now();
+    const group: BoardGroup = {
+      id: init.id && !this.getGroup(init.id) ? init.id : nanoid(8),
+      title: init.title,
+      x: init.pos?.x ?? 0,
+      y: init.pos?.y ?? 0,
+      pinned: !!init.pos,
+      fold: false,
+      order: orders.length ? Math.min(...orders) - 0.5 : now,
+      createdAt: now,
+    };
+    this.board.groups.push(group);
+    this.emit({ type: "group:upsert", group });
+    for (const id of ids) this.moveToGroup(id, group.id);
+    return group;
+  }
+
+  updateGroup(id: string, patch: GroupPatch) {
+    const group = this.getGroup(id);
+    if (!group) return;
+    Object.assign(group, stripUndefined(patch));
+    this.emit({ type: "group:upsert", group });
+    return group;
+  }
+
+  /** withContent：连同里面的卡片一起删除；否则解散，主题变成未分组的 */
+  deleteGroup(id: string, withContent = false) {
+    if (!this.getGroup(id)) return;
+    if (withContent) {
+      const ids = new Set(this.board.nodes.filter((n) => this.groupOf(n.id) === id).map((n) => n.id));
+      const removed = this.board.edges.filter((e) => ids.has(e.source) || ids.has(e.target));
+      this.board.nodes = this.board.nodes.filter((n) => !ids.has(n.id));
+      this.board.edges = this.board.edges.filter((e) => !ids.has(e.source) && !ids.has(e.target));
+      for (const e of removed) this.emit({ type: "edge:delete", id: e.id });
+      for (const nid of ids) this.emit({ type: "node:delete", id: nid });
+    } else {
+      for (const n of this.board.nodes.filter((n) => !n.parentId && n.groupId === id)) this.moveToGroup(n.id, null);
+    }
+    this.board.groups = this.board.groups.filter((g) => g.id !== id);
+    this.emit({ type: "group:delete", id });
+  }
+
+  /**
+   * 把节点（连同子树）移到分组里（null 为不分组）。分组只装完整的主题，
+   * 所以非主题会从原树上断开；跨分组时留一条关系线指回原来的父节点。
+   */
+  moveToGroup(id: string, groupId: string | null, pos?: { x: number; y: number }) {
+    const node = this.get(id);
+    if (!node || (groupId && !this.getGroup(groupId))) return;
+    const oldParent = node.parentId;
+    this.updateNode(id, {
+      parentId: null,
+      groupId: groupId ?? undefined,
+      ...(pos ? { x: pos.x, y: pos.y, pinned: true } : { pinned: false }),
+    });
+    if (oldParent && this.groupOf(oldParent) !== (groupId ?? undefined)) this.addEdge(id, oldParent, { label: "来自" });
+    return node;
+  }
+
+  /** 去掉祖先也在列表里的节点 */
+  private topMost(ids: string[]) {
+    const set = new Set(ids.map((id) => this.resolve(id)?.id).filter(Boolean) as string[]);
+    return [...set].filter((id) => ![...set].some((a) => a !== id && this.isDescendant(id, a)));
   }
 
   findEdge(a: string, b: string) {
@@ -252,11 +368,12 @@ export class BoardStore {
         ...stripUndefined({ label: e.label || undefined, reverseLabel: e.reverseLabel || undefined }),
       }));
     if (mode === "replace") {
-      this.replaceBoard({ nodes: imported, edges: importedEdges, chat: this.board.chat });
+      this.replaceBoard({ nodes: imported, edges: importedEdges, groups: [], chat: this.board.chat });
     } else {
       this.replaceBoard({
         nodes: [...this.board.nodes, ...imported],
         edges: [...this.board.edges, ...importedEdges],
+        groups: this.board.groups,
         chat: this.board.chat,
       });
     }
@@ -311,16 +428,31 @@ export class BoardStore {
   outline(maxNodes = 150) {
     if (!this.board.nodes.length) return "(白板为空)";
     const lines: string[] = [];
-    const walk = (parentId: string | null, depth: number) => {
-      for (const n of this.children(parentId)) {
+    const walk = (list: BoardNode[], depth: number) => {
+      for (const n of list) {
         if (lines.length >= maxNodes) return;
         const summary = n.summary || (n.kind === "widget" ? "" : firstLine(n.md, 50));
         const tag = n.kind === "widget" ? "[组件] " : "";
         lines.push(`${"  ".repeat(depth)}- [${n.id}] ${tag}${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}`);
-        walk(n.id, depth + 1);
+        walk(this.children(n.id), depth + 1);
       }
     };
-    walk(null, 0);
+    const roots = this.children(null);
+    if (!this.board.groups.length) walk(roots, 0);
+    else {
+      // 有分组时按分组分段
+      for (const g of this.board.groups) {
+        lines.push(`## 分组 [${g.id}] ${g.title || "(未命名)"}${g.fold ? "（已折叠）" : ""}`);
+        const members = roots.filter((n) => n.groupId === g.id);
+        if (members.length) walk(members, 0);
+        else lines.push("(空)");
+      }
+      const rest = roots.filter((n) => !n.groupId);
+      if (rest.length) {
+        lines.push("## 未分组");
+        walk(rest, 0);
+      }
+    }
     if (this.board.edges.length) {
       lines.push("", "关系：");
       for (const e of this.board.edges) {
@@ -350,7 +482,18 @@ function normalizeBoard(board: Partial<Board>): Board {
     y: n.y ?? 0,
   }));
   const edges = (board.edges ?? []).map((e: any) => ({ dir: "forward", ...e }));
-  return { nodes, edges, chat: board.chat ?? [] };
+  const groups: BoardGroup[] = (board.groups ?? []).map((g: any) => ({
+    title: "",
+    x: 0,
+    y: 0,
+    pinned: false,
+    fold: false,
+    order: g.createdAt ?? 0,
+    ...g,
+  }));
+  const groupIds = new Set(groups.map((g) => g.id));
+  for (const n of nodes) if (n.groupId && (n.parentId || !groupIds.has(n.groupId))) delete n.groupId;
+  return { nodes, edges, groups, chat: board.chat ?? [] };
 }
 
 export function firstLine(md: string, max = 40) {

@@ -39,11 +39,24 @@ function parentOf(ctx: ToolContext, parentId: string | null | undefined) {
   return must(ctx, parentId).id;
 }
 
+/** 新主题默认放进用户选中节点所在的分组 */
+function topicGroup(ctx: ToolContext, parent: string | null) {
+  if (parent) return undefined;
+  const focus = ctx.defaultParent();
+  return focus ? ctx.store.groupOf(focus) : undefined;
+}
+
+function mustGroup(ctx: ToolContext, id: string) {
+  const group = ctx.store.resolveGroup(id);
+  if (!group) throw new Error(`分组 ${id} 不存在，先用 canvas_list 查看`);
+  return group;
+}
+
 export function createCanvasTools(ctx: ToolContext) {
   const list = defineTool({
     name: "canvas_list",
     label: "查看白板",
-    description: "查看整棵思维树：每个节点的 id、标题和摘要，缩进表示层级",
+    description: "查看整棵思维树：每个节点的 id、标题和摘要，缩进表示层级；有分组时按分组分段",
     parameters: Type.Object({}),
     execute: async () => result(ctx.store.outline(400)),
   });
@@ -89,7 +102,7 @@ export function createCanvasTools(ctx: ToolContext) {
         ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false });
         return result(`已创建节点 ${draftId}`, draftId);
       }
-      const node = ctx.store.createNode({ title, summary, md, parentId: parent }, true);
+      const node = ctx.store.createNode({ title, summary, md, parentId: parent, groupId: topicGroup(ctx, parent) }, true);
       return result(`已创建节点 ${node.id}`, node.id);
     },
   });
@@ -114,7 +127,7 @@ export function createCanvasTools(ctx: ToolContext) {
       if (draftId) {
         ctx.store.updateNode(draftId, { ...init, draft: false });
         id = draftId;
-      } else id = ctx.store.createNode(init, true).id;
+      } else id = ctx.store.createNode({ ...init, groupId: topicGroup(ctx, parent) }, true).id;
       return result(`已创建组件 ${id}，${await widgetReport(ctx, id)}`, id);
     },
   });
@@ -215,7 +228,54 @@ export function createCanvasTools(ctx: ToolContext) {
     },
   });
 
-  const tools = [list, read, create, createWidget, edit, move, del, link, unlink];
+  const group = defineTool({
+    name: "canvas_group",
+    label: "分组",
+    description:
+      "分组是画布上的一块区域，装若干个完整的主题，用来把白板分成几块、减少杂乱（分组不属于思维树，主题内部的层级仍然用父子节点表达）。" +
+      "不传 groupId 时新建分组并装入 ids；传 groupId 时把 ids 加进这个已有分组，或修改标题、折叠状态。" +
+      "ids 里的非主题节点会从原来的树上断开，成为分组里的新主题。",
+    parameters: Type.Object({
+      groupId: Type.Optional(Type.String({ description: "已有分组的 id；省略则新建" })),
+      title: Type.Optional(Type.String({ description: "分组标题，≤ 12 字；新建时必填" })),
+      ids: Type.Optional(Type.Array(Type.String(), { description: "要放进分组的节点 id" })),
+      fold: Type.Optional(Type.Boolean({ description: "折叠成一张小卡片（次要内容可以折叠）" })),
+    }),
+    execute: async (_id, { groupId, title, ids, fold }) => {
+      const nodeIds = (ids ?? []).map((id) => must(ctx, id).id);
+      if (!groupId) {
+        if (!title) throw new Error("新建分组需要 title");
+        const g = ctx.store.createGroup({ title, nodeIds });
+        if (fold) ctx.store.updateGroup(g.id, { fold });
+        return result(`已创建分组 ${g.id}`);
+      }
+      const g = mustGroup(ctx, groupId);
+      for (const id of nodeIds) ctx.store.moveToGroup(id, g.id);
+      ctx.store.updateGroup(g.id, { title, fold });
+      return result(`已更新分组 ${g.id}`);
+    },
+  });
+
+  const ungroup = defineTool({
+    name: "canvas_ungroup",
+    label: "移出分组",
+    description: "把节点移出分组（变成未分组的主题）；只传 groupId 时解散整个分组，里面的主题保留。",
+    parameters: Type.Object({
+      ids: Type.Optional(Type.Array(Type.String(), { description: "要移出分组的节点 id" })),
+      groupId: Type.Optional(Type.String({ description: "要解散的分组 id" })),
+    }),
+    execute: async (_id, { ids, groupId }) => {
+      if (ids?.length) {
+        for (const id of ids) ctx.store.moveToGroup(must(ctx, id).id, null);
+        return result(`已移出 ${ids.length} 个节点`);
+      }
+      if (!groupId) throw new Error("需要 ids 或 groupId");
+      ctx.store.deleteGroup(mustGroup(ctx, groupId).id);
+      return result("已解散分组");
+    },
+  });
+
+  const tools = [list, read, create, createWidget, edit, move, del, link, unlink, group, ungroup];
 
   if (ctx.dispatch) {
     const dispatch = ctx.dispatch;

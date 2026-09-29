@@ -5,7 +5,21 @@ import { BoardStore } from "./store.ts";
 import type { ClientMsg, ServerMsg } from "./types.ts";
 import { VersionTree } from "./versions.ts";
 
-const MANUAL = new Set(["node:update", "node:create", "node:delete", "node:revert", "edge:add", "edge:update", "edge:reverse", "edge:delete", "node:restore"]);
+const MANUAL = new Set([
+  "node:update",
+  "node:create",
+  "node:delete",
+  "node:revert",
+  "edge:add",
+  "edge:update",
+  "edge:reverse",
+  "edge:delete",
+  "node:restore",
+  "group:create",
+  "group:update",
+  "group:delete",
+  "node:toGroup",
+]);
 const LAYOUT_ONLY = ["x", "y", "pinned", "open", "fold"];
 
 /** 一块白板：内容、版本树、主对话 agent 和后台任务，彼此独立 */
@@ -91,7 +105,8 @@ export class Workspace {
 
   async handle(msg: ClientMsg) {
     const { store, main, tasks, versions } = this;
-    const layoutOnly = msg.type === "node:update" && Object.keys(msg.patch).every((k) => LAYOUT_ONLY.includes(k));
+    const layoutOnly =
+      (msg.type === "node:update" || msg.type === "group:update") && Object.keys(msg.patch).every((k) => LAYOUT_ONLY.includes(k));
     if (MANUAL.has(msg.type) && !layoutOnly) this.manualEdit();
     switch (msg.type) {
       case "chat":
@@ -111,6 +126,7 @@ export class Workspace {
         store.createNode({
           id: msg.id,
           parentId: msg.parentId,
+          groupId: msg.groupId,
           open: true,
           ...(msg.x !== undefined && msg.y !== undefined ? { x: msg.x, y: msg.y, pinned: true } : {}),
         });
@@ -134,6 +150,23 @@ export class Workspace {
         break;
       case "edge:reverse":
         store.reverseEdge(msg.id);
+        break;
+      case "group:create":
+        store.createGroup({
+          id: msg.id,
+          title: msg.title,
+          nodeIds: msg.nodeIds,
+          pos: msg.x !== undefined && msg.y !== undefined ? { x: msg.x, y: msg.y } : undefined,
+        });
+        break;
+      case "group:update":
+        store.updateGroup(msg.id, msg.patch);
+        break;
+      case "group:delete":
+        store.deleteGroup(msg.id, msg.withContent);
+        break;
+      case "node:toGroup":
+        store.moveToGroup(msg.id, msg.groupId, msg.x !== undefined && msg.y !== undefined ? { x: msg.x, y: msg.y } : undefined);
         break;
       case "task:create":
         tasks.run(msg.kind, "", msg.instructions, msg.contextNodeIds);

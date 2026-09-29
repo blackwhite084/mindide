@@ -23,6 +23,7 @@ const CANVAS_RULES = `白板是一棵（或几棵）思维树，面向内容而�
 - 修改已有内容时用 canvas_edit_node 的 edits 做小范围替换，让用户看清改了哪里；需要调整层级时用 canvas_move_node。
 - 节点之间的关系用 canvas_link，并写上简短的关系文字（如「导致」「依赖」「反例」），双向关系可以给两个方向写不同的文字。
 - 兄弟节点之间如果其实是「前提 → 展开」「总 → 分」的关系，用 canvas_move_node 形成上下层级，而不是连线。
+- 主题多了（大约 6 个以上）就用 canvas_group 把相关主题分成几个分组，给画面分区；次要的分组可以折叠。主题内部的归类仍然用父子节点，不要用分组。
 - 新建前先看白板索引，避免重复，已有的节点就在原处补充或修改。
 - 图表、SVG 插图、结构示意、交互演示、对白板内容的自定义可视化等文字说不清的内容，用 canvas_create_widget 做成组件节点；工具结果会告诉你运行是否报错，报错就修好。`;
 
@@ -147,6 +148,13 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
       nodeId = args?.target;
       break;
     }
+    case "canvas_group":
+      label = args?.groupId ? `更新分组${args?.title ? `「${args.title}」` : ""}` : args?.title ? `新建分组「${args.title}」` : "新建分组…";
+      nodeId = args?.ids?.[0];
+      break;
+    case "canvas_ungroup":
+      label = args?.ids?.length ? `移出分组 ${args.ids.map((i: string) => name(i)).join("")}` : "解散分组";
+      break;
     case "canvas_unlink":
       label = `删除关系 ${name(args?.source)} — ${name(args?.target)}`;
       break;

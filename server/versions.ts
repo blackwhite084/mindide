@@ -105,7 +105,8 @@ function sameBoard(a: Board, b: Board) {
   // 只移动位置不算新版本，但新版本会带上最新布局
   const key = (x: Board) =>
     JSON.stringify({
-      n: x.nodes.map((n) => [n.id, n.title, n.summary, n.md, n.parentId]),
+      n: x.nodes.map((n) => [n.id, n.title, n.summary, n.md, n.parentId, n.groupId]),
+      g: (x.groups ?? []).map((g) => [g.id, g.title]),
       e: x.edges.map((e) => [e.source, e.target, e.dir, e.label, e.reverseLabel]),
     });
   return key(a) === key(b);

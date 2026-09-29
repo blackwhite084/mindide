@@ -1,4 +1,4 @@
-import type { BoardEdge, BoardNode } from "../../server/types.ts";
+import type { BoardEdge, BoardGroup, BoardNode } from "../../server/types.ts";
 
 export interface Size {
   w: number;
@@ -17,6 +17,20 @@ export interface Layout {
   parent: Map<string, string>;
   /** 同列关系线的车道号（越大离卡片越远） */
   lanes: Map<string, number>;
+  /** 分组的框（绝对坐标） */
+  groups: Map<string, GroupBox>;
+  /** 可见节点 → 所在分组 */
+  region: Map<string, string>;
+}
+
+export interface GroupBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 组内坐标原点（绝对坐标）：组内卡片的 x/y 相对这里 */
+  ox: number;
+  oy: number;
 }
 
 const GAP_X = 72;
@@ -26,6 +40,13 @@ const GAP_ROOT = 90;
 export const LANE_BASE = 26;
 export const LANE_STEP = 18;
 const LABEL_ROOM = 64;
+
+/** 分组：内边距、标题栏高度、空分组的最小内容区、折叠后的默认尺寸 */
+export const GROUP_PAD = 24;
+export const GROUP_HEAD = 40;
+const GROUP_MIN = { w: 280, h: 90 };
+export const GROUP_FOLDED = { w: 280, h: 92 };
+export const groupKey = (id: string) => `group:${id}`;
 
 export const widthOf = (depth: number) => (depth === 0 ? 320 : depth === 1 ? 290 : 270);
 
@@ -60,8 +81,14 @@ function orderByRelations(list: BoardNode[], adj: Map<string, Set<string>>): Boa
  * 思维导图布局：根在左，子节点在右侧纵向排开，父节点相对子树垂直居中。
  * 手动固定（pinned）的节点以自己的位置为起点单独排它的子树。
  */
-export function layoutTree(nodes: BoardNode[], sizes: Map<string, Size>, edges: BoardEdge[] = []): Layout {
+export function layoutTree(
+  nodes: BoardNode[],
+  sizes: Map<string, Size>,
+  edges: BoardEdge[] = [],
+  groupList: BoardGroup[] = [],
+): Layout {
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  const groupById = new Map(groupList.map((g) => [g.id, g]));
   const kids = new Map<string | null, BoardNode[]>();
   for (const n of nodes) {
     const p = n.parentId && byId.has(n.parentId) ? n.parentId : null;
@@ -84,23 +111,31 @@ export function layoutTree(nodes: BoardNode[], sizes: Map<string, Size>, edges: 
   const branch = new Map<string, number>();
   const childCount = new Map<string, number>();
   const parent = new Map<string, string>();
+  const region = new Map<string, string>();
   const visible: string[] = [];
   let branchSeq = 0;
 
-  const visit = (n: BoardNode, d: number, b: number) => {
+  const visit = (n: BoardNode, d: number, b: number, g: string | undefined) => {
     depth.set(n.id, d);
     branch.set(n.id, b);
+    if (g) region.set(n.id, g);
     visible.push(n.id);
     const cs = kids.get(n.id) ?? [];
     childCount.set(n.id, cs.length);
     if (n.fold) return;
     for (const c of cs) {
       parent.set(c.id, n.id);
-      visit(c, d + 1, d === 0 ? branchSeq++ : b);
+      visit(c, d + 1, d === 0 ? branchSeq++ : b, g);
     }
   };
   const roots = kids.get(null) ?? [];
-  for (const r of roots) visit(r, 0, -1);
+  const groupOf = (r: BoardNode) => (r.groupId && groupById.has(r.groupId) ? r.groupId : undefined);
+  for (const r of roots) {
+    const g = groupOf(r);
+    // 折叠的分组里的卡片不显示
+    if (g && groupById.get(g)!.fold) continue;
+    visit(r, 0, -1, g);
+  }
 
   // 同一列（同深度且都未固定）的关系线：按纵向区间分配车道，互不重叠的可以共用一条
   const order = new Map(visible.map((id, i) => [id, i]));
@@ -109,6 +144,7 @@ export function layoutTree(nodes: BoardNode[], sizes: Map<string, Size>, edges: 
   const sameColumn = edges
     .filter((e) => order.has(e.source) && order.has(e.target))
     .filter((e) => depth.get(e.source) === depth.get(e.target) && !byId.get(e.source)!.pinned && !byId.get(e.target)!.pinned)
+    .filter((e) => region.get(e.source) === region.get(e.target))
     .map((e) => {
       const [a, b] = [order.get(e.source)!, order.get(e.target)!].sort((x, y) => x - y);
       return { e, a, b, d: depth.get(e.source)! };
@@ -157,19 +193,80 @@ export function layoutTree(nodes: BoardNode[], sizes: Map<string, Size>, edges: 
     }
   };
 
-  // 自动排的根节点从上到下依次排列
-  let y = 0;
-  for (const r of roots.filter((r) => !r.pinned)) {
-    place(r.id, 0, y);
-    y += subtreeH(r.id) + GAP_ROOT;
-  }
-  // 固定的节点：保持自己的位置，子树在它右侧展开
-  for (const id of visible) {
-    const n = byId.get(id)!;
-    if (!n.pinned) continue;
-    const H = subtreeH(id);
-    place(id, n.x, n.y - (H - size(id).h) / 2);
+  /** 排一片区域（未分组 / 某个分组）里固定位置的节点：保持自己的位置，子树在它右侧展开 */
+  const placePinned = (g: string | undefined) => {
+    for (const id of visible) {
+      const n = byId.get(id)!;
+      if (!n.pinned || region.get(id) !== g) continue;
+      const H = subtreeH(id);
+      place(id, n.x, n.y - (H - size(id).h) / 2);
+    }
+  };
+
+  // 1. 每个分组内部单独排版（组内坐标），再算出框的范围
+  const rel = new Map<string, { left: number; top: number; w: number; h: number }>();
+  for (const g of groupList) {
+    if (g.fold) {
+      const s = sizes.get(groupKey(g.id)) ?? GROUP_FOLDED;
+      rel.set(g.id, { left: -GROUP_PAD, top: -GROUP_PAD - GROUP_HEAD, w: s.w, h: s.h });
+      continue;
+    }
+    let y = 0;
+    for (const r of roots.filter((r) => groupOf(r) === g.id && !r.pinned)) {
+      place(r.id, 0, y);
+      y += subtreeH(r.id) + GAP_ROOT;
+    }
+    placePinned(g.id);
+    let [x0, y0, x1, y1] = [0, 0, GROUP_MIN.w, GROUP_MIN.h];
+    for (const id of visible) {
+      if (region.get(id) !== g.id) continue;
+      const p = pos.get(id)!;
+      const s = size(id);
+      x0 = Math.min(x0, p.x);
+      y0 = Math.min(y0, p.y);
+      x1 = Math.max(x1, p.x + s.w);
+      y1 = Math.max(y1, p.y + s.h);
+    }
+    rel.set(g.id, {
+      left: x0 - GROUP_PAD,
+      top: y0 - GROUP_PAD - GROUP_HEAD,
+      w: x1 - x0 + GROUP_PAD * 2,
+      h: y1 - y0 + GROUP_PAD * 2 + GROUP_HEAD,
+    });
   }
 
-  return { pos, depth, branch, childCount, visible, parent, lanes };
+  // 2. 顶层：没固定的分组和未分组的主题一起从上到下排列，分组当成一整块
+  const origin = new Map<string, { x: number; y: number }>();
+  const stack = [
+    ...roots.filter((r) => !groupOf(r) && !r.pinned).map((r) => ({ key: r.createdAt, root: r, group: undefined })),
+    ...groupList.filter((g) => !g.pinned).map((g) => ({ key: g.order, root: undefined, group: g })),
+  ].sort((a, b) => a.key - b.key);
+  let y = 0;
+  for (const item of stack) {
+    if (item.root) {
+      place(item.root.id, 0, y);
+      y += subtreeH(item.root.id) + GAP_ROOT;
+    } else {
+      const r = rel.get(item.group!.id)!;
+      origin.set(item.group!.id, { x: -r.left, y: y - r.top });
+      y += r.h + GAP_ROOT;
+    }
+  }
+  for (const g of groupList) if (g.pinned) origin.set(g.id, { x: g.x, y: g.y });
+  placePinned(undefined);
+
+  // 3. 组内坐标 → 绝对坐标
+  const groups = new Map<string, GroupBox>();
+  for (const g of groupList) {
+    const o = origin.get(g.id)!;
+    const r = rel.get(g.id)!;
+    groups.set(g.id, { x: o.x + r.left, y: o.y + r.top, w: r.w, h: r.h, ox: o.x, oy: o.y });
+  }
+  for (const [id, g] of region) {
+    const p = pos.get(id)!;
+    const o = origin.get(g)!;
+    pos.set(id, { x: p.x + o.x, y: p.y + o.y });
+  }
+
+  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region };
 }

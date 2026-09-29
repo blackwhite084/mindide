@@ -40,6 +40,8 @@ export interface BoardNode {
   open: boolean;
   /** 折叠子树 */
   fold: boolean;
+  /** 所在分组，只写在根节点（主题）上；子节点跟随所在主题 */
+  groupId?: string;
   /** 模型仍在生成中的草稿节点 */
   draft?: boolean;
   lastEdit?: LastEdit;
@@ -62,6 +64,27 @@ export interface BoardEdge {
 
 export type EdgePatch = Partial<Pick<BoardEdge, "dir" | "label" | "reverseLabel">>;
 
+/**
+ * 分组：画布上的一块区域，装若干个完整的主题（不属于思维树）。
+ * 组内卡片的 x/y 是相对分组原点的坐标，移动分组不需要改动里面的卡片。
+ */
+export interface BoardGroup {
+  id: string;
+  title: string;
+  /** 分组原点（组内自动排版从这里开始）；pinned 时有效 */
+  x: number;
+  y: number;
+  /** 拖动过就固定位置，否则和未分组的主题一起自动排列 */
+  pinned: boolean;
+  /** 折叠成一张小卡片 */
+  fold: boolean;
+  /** 自动排列时的顺序键（和主题的 createdAt 比较） */
+  order: number;
+  createdAt: number;
+}
+
+export type GroupPatch = Partial<Pick<BoardGroup, "title" | "x" | "y" | "pinned" | "fold">>;
+
 export interface ChatEntry {
   id: string;
   role: "user" | "ai";
@@ -77,6 +100,7 @@ export interface ChatEntry {
 export interface Board {
   nodes: BoardNode[];
   edges: BoardEdge[];
+  groups: BoardGroup[];
   chat: ChatEntry[];
 }
 
@@ -160,6 +184,8 @@ export type ServerMsg =
   | { type: "node:delete"; id: string }
   | { type: "edge:add"; edge: BoardEdge }
   | { type: "edge:delete"; id: string }
+  | { type: "group:upsert"; group: BoardGroup }
+  | { type: "group:delete"; id: string }
   | { type: "chat:upsert"; entry: ChatEntry }
   | { type: "chat:delta"; id: string; delta: string; field?: "text" | "thinking" }
   | { type: "boards"; boards: BoardMeta[]; current: string }
@@ -179,13 +205,20 @@ export type ClientMsg =
   | { type: "abort" }
   | { type: "queue:clear" }
   | { type: "node:update"; id: string; patch: NodePatch }
-  | { type: "node:create"; id: string; parentId: string | null; x?: number; y?: number }
+  | { type: "node:create"; id: string; parentId: string | null; x?: number; y?: number; groupId?: string }
   | { type: "node:delete"; id: string }
   | { type: "node:revert"; id: string }
   | { type: "edge:add"; source: string; target: string }
   | { type: "edge:update"; id: string; patch: EdgePatch }
   | { type: "edge:reverse"; id: string }
   | { type: "edge:delete"; id: string }
+  /** 把节点打包成新分组；x/y 给出时分组固定在那里 */
+  | { type: "group:create"; id: string; title: string; nodeIds: string[]; x?: number; y?: number }
+  | { type: "group:update"; id: string; patch: GroupPatch }
+  /** withContent：连里面的卡片一起删除；否则解散（卡片变成未分组的主题） */
+  | { type: "group:delete"; id: string; withContent: boolean }
+  /** 把节点（连同子树）移到某个分组（null 为不分组）；非主题会从原树上断开 */
+  | { type: "node:toGroup"; id: string; groupId: string | null; x?: number; y?: number }
   | { type: "task:create"; kind: TaskKind; instructions: string; contextNodeIds: string[] }
   | { type: "task:steer"; id: string; text: string }
   | { type: "task:abort"; id: string }

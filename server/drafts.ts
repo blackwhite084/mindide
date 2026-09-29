@@ -37,7 +37,7 @@ export class DraftTracker {
         title: String(args.title),
         summary: String(args.summary ?? ""),
         md: String(args.md ?? ""),
-        parentId: this.parentOf(args.parentId, final) ?? this.defaultParent(),
+        ...this.placement(this.parentOf(args.parentId, final)),
       });
       this.drafts.set(toolCall.id, { nodeId: node.id, lastEmit: Date.now() });
       return;
@@ -76,6 +76,14 @@ export class DraftTracker {
       if (this.store.get(d.nodeId)?.draft) this.store.deleteNode(d.nodeId);
     }
     this.drafts.clear();
+  }
+
+  /** 省略 parentId 时挂在默认父节点下；新主题放进默认父节点所在的分组 */
+  private placement(parentId: string | null | undefined) {
+    const fallback = this.defaultParent();
+    if (parentId === undefined) return { parentId: fallback };
+    if (parentId === null && fallback) return { parentId, groupId: this.store.groupOf(fallback) };
+    return { parentId };
   }
 
   /** 流式中的 id 可能还没写完，只认完整匹配；undefined 表示暂不确定 */

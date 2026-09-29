@@ -116,7 +116,14 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
     setDraftTitle(node.title);
     setDraftMd(node.md);
     setEditing(true);
-    requestAnimationFrame(() => (focus === "title" ? titleRef.current : taRef.current)?.focus());
+    // 新建的节点在测量完之前是隐藏的，拿不到焦点：多试几帧
+    let tries = 0;
+    const tryFocus = () => {
+      const el = focus === "title" ? titleRef.current : taRef.current;
+      el?.focus();
+      if ((!el || document.activeElement !== el) && tries++ < 20) requestAnimationFrame(tryFocus);
+    };
+    requestAnimationFrame(tryFocus);
   };
 
   // 新建的空节点直接进入编辑；右键菜单“手动编辑”也走这里

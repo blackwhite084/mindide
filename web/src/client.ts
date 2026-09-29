@@ -5,9 +5,11 @@ import type {
   Source,
   ThinkingLevel,
   BoardEdge,
+  BoardGroup,
   BoardNode,
   ChatEntry,
   ClientMsg,
+  GroupPatch,
   NodePatch,
   QueueState,
   ServerMsg,
@@ -20,6 +22,7 @@ export interface ClientState {
   connected: boolean;
   nodes: Map<string, BoardNode>;
   edges: Map<string, BoardEdge>;
+  groups: Map<string, BoardGroup>;
   chat: ChatEntry[];
   tasks: Map<string, Task>;
   queue: QueueState;
@@ -46,6 +49,7 @@ class Client {
     connected: false,
     nodes: new Map(),
     edges: new Map(),
+    groups: new Map(),
     chat: [],
     tasks: new Map(),
     queue: { steering: [], followUp: [] },
@@ -169,6 +173,18 @@ class Client {
         this.set({ edges });
         break;
       }
+      case "group:upsert": {
+        const groups = new Map(s.groups);
+        groups.set(msg.group.id, msg.group);
+        this.set({ groups });
+        break;
+      }
+      case "group:delete": {
+        const groups = new Map(s.groups);
+        groups.delete(msg.id);
+        this.set({ groups });
+        break;
+      }
       case "chat:upsert": {
         const i = s.chat.findIndex((c) => c.id === msg.entry.id);
         const chat = i >= 0 ? s.chat.map((c, j) => (j === i ? msg.entry : c)) : [...s.chat, msg.entry];
@@ -213,6 +229,7 @@ class Client {
     this.set({
       nodes: new Map(board.nodes.map((n) => [n.id, n])),
       edges: new Map(board.edges.map((e) => [e.id, e])),
+      groups: new Map((board.groups ?? []).map((g) => [g.id, g])),
       chat: board.chat ?? [],
     });
   }
@@ -225,6 +242,23 @@ class Client {
     nodes.set(id, { ...n, ...patch });
     this.set({ nodes });
     this.send({ type: "node:update", id, patch });
+  }
+
+  patchGroup(id: string, patch: GroupPatch) {
+    const g = this.state.groups.get(id);
+    if (!g) return;
+    const groups = new Map(this.state.groups);
+    groups.set(id, { ...g, ...patch });
+    this.set({ groups });
+    this.send({ type: "group:update", id, patch });
+  }
+
+  /** 把节点打包成新分组（nodeIds 为空则是空分组），新建后直接进入改名 */
+  createGroup(nodeIds: string[], pos?: { x: number; y: number }) {
+    const id = Math.random().toString(36).slice(2, 10);
+    this.editRequest = `group:${id}`;
+    this.send({ type: "group:create", id, title: "新分组", nodeIds, ...(pos ?? {}) });
+    return id;
   }
 
   startCompare(versionId: string) {
@@ -247,10 +281,10 @@ class Client {
     return data as { added: string[]; rejected: string[] };
   }
 
-  createNode(parentId: string | null, pos?: { x: number; y: number }) {
+  createNode(parentId: string | null, pos?: { x: number; y: number }, groupId?: string) {
     const id = Math.random().toString(36).slice(2, 10);
     this.editRequest = id;
-    this.send({ type: "node:create", id, parentId, ...(pos ?? {}) });
+    this.send({ type: "node:create", id, parentId, groupId, ...(pos ?? {}) });
     return id;
   }
 }
