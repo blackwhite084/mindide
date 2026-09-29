@@ -147,6 +147,8 @@ class Client {
         break;
       }
       case "node:edit":
+        // 组件代码的改动不逐字播放，直接重新运行
+        if (msg.field === "md" && s.nodes.get(msg.id)?.kind === "widget") break;
         animator.enqueue(msg.id, msg.field ?? "md", msg.before, msg.after, msg.by);
         break;
       case "node:delete": {
@@ -257,7 +259,7 @@ export const client = new Client();
 
 /** 节点摘要：优先用 summary，没有则取正文第一行 */
 export function summaryOf(n: BoardNode) {
-  if (n.summary) return n.summary;
+  if (n.summary || n.kind === "widget") return n.summary;
   const line = n.md.split("\n").find((l) => l.trim()) ?? "";
   return line.replace(/^[#>\-*\d.\s]+/, "").replace(/\*\*/g, "").trim();
 }

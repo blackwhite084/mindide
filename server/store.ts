@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
 import type { Board, BoardEdge, BoardNode, ChatEntry, EdgePatch, EditField, ServerMsg, Task } from "./types.ts";
+import { codeHash } from "./widget.ts";
 
 type Listener = (msg: ServerMsg) => void;
 
@@ -227,7 +228,7 @@ export class BoardStore {
     const now = Date.now();
     const imported: BoardNode[] = nodes.map((n, i) => ({
       id: idMap.get(n.id)!,
-      kind: n.kind === "task" ? "task" : "note",
+      kind: n.kind === "task" || n.kind === "widget" ? n.kind : "note",
       title: n.title ?? "",
       summary: n.summary ?? "",
       md: n.md ?? "",
@@ -267,6 +268,45 @@ export class BoardStore {
     this.emit({ type: "task:upsert", task });
   }
 
+  // ---------- 组件运行结果（前端上报，不持久化） ----------
+
+  private widgetStatus = new Map<string, { hash: string; error: string | null }>();
+  private widgetWaiters = new Set<() => void>();
+
+  reportWidget(id: string, hash: string, error: string | null) {
+    this.widgetStatus.set(id, { hash, error });
+    for (const fn of this.widgetWaiters) fn();
+  }
+
+  /** 当前这版代码的运行结果；还没有前端运行过则为 undefined */
+  widgetResult(id: string) {
+    const node = this.get(id);
+    const s = this.widgetStatus.get(id);
+    return node && s && s.hash === codeHash(node.md) ? s : undefined;
+  }
+
+  /** 等前端跑完当前这版代码（超时返回 undefined，例如没有打开白板） */
+  waitWidget(id: string, timeoutMs = 6000) {
+    return new Promise<{ error: string | null } | undefined>((resolve) => {
+      const check = () => {
+        const s = this.widgetResult(id);
+        if (!s) return;
+        done();
+        resolve(s);
+      };
+      const done = () => {
+        clearTimeout(timer);
+        this.widgetWaiters.delete(check);
+      };
+      const timer = setTimeout(() => {
+        done();
+        resolve(undefined);
+      }, timeoutMs);
+      this.widgetWaiters.add(check);
+      check();
+    });
+  }
+
   /** 给模型看的思维树（缩进表示层级） */
   outline(maxNodes = 150) {
     if (!this.board.nodes.length) return "(白板为空)";
@@ -274,8 +314,9 @@ export class BoardStore {
     const walk = (parentId: string | null, depth: number) => {
       for (const n of this.children(parentId)) {
         if (lines.length >= maxNodes) return;
-        const summary = n.summary || firstLine(n.md, 50);
-        lines.push(`${"  ".repeat(depth)}- [${n.id}] ${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}`);
+        const summary = n.summary || (n.kind === "widget" ? "" : firstLine(n.md, 50));
+        const tag = n.kind === "widget" ? "[组件] " : "";
+        lines.push(`${"  ".repeat(depth)}- [${n.id}] ${tag}${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}`);
         walk(n.id, depth + 1);
       }
     };

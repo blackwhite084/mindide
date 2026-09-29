@@ -155,6 +155,9 @@ export class Workspace {
       case "sources:bash":
         this.sources.setBash(msg.id, msg.allow);
         break;
+      case "widget:status":
+        store.reportWidget(msg.id, msg.hash, msg.error);
+        break;
       case "sources:remove":
         this.sources.remove(msg.id);
         break;

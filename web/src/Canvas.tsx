@@ -248,12 +248,18 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           { label: "让 AI 改这个节点…", hint: "推荐", onClick: () => ui.askAI(id, titleOf(n)) },
           { sep: true },
           ...(n.md.trim() && detail === "summary"
-            ? [{ label: n.open ? "收起正文" : "展开正文", hint: "双击", onClick: () => client.patchNode(id, { open: !n.open }) }]
+            ? [
+                {
+                  label: n.kind === "widget" ? (n.open ? "收起组件" : "运行组件") : n.open ? "收起正文" : "展开正文",
+                  hint: "双击",
+                  onClick: () => client.patchNode(id, { open: !n.open }),
+                },
+              ]
             : []),
           ...((layout.childCount.get(id) ?? 0) > 0
             ? [{ label: n.fold ? "展开分支" : "折叠分支", onClick: () => client.patchNode(id, { fold: !n.fold }) }]
             : []),
-          { label: "手动编辑", onClick: () => ui.requestEdit(id) },
+          { label: n.kind === "widget" ? "编辑代码" : "手动编辑", onClick: () => ui.requestEdit(id) },
           { label: "添加子节点", hint: "Tab", onClick: () => client.createNode(id) },
           { label: "添加同级节点", hint: "⇧Tab", onClick: () => client.createNode(n.parentId) },
           ...(n.pinned ? [{ label: "恢复自动排版", onClick: () => client.patchNode(id, { pinned: false }) }] : []),

@@ -127,6 +127,22 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .mdnode.d-0 .summary { font-size: 13px; color: #c3c9d2; }
 .placeholder, .thinking { color: var(--muted); font-size: 12.5px; }
 
+/* 组件节点：展开时加宽，高度跟随内容（iframe 自己上报） */
+.mdnode.k-widget { border-color: color-mix(in srgb, #7dcfff 35%, var(--line)); }
+.mdnode.k-widget.open { width: 520px; }
+.mdnode.k-widget.open .mdnode-body { max-height: none; overflow: visible; }
+.mdnode-head .kind.widget { color: #7dcfff; background: rgba(125, 207, 255, 0.12); }
+.widget { position: relative; margin-top: 6px; }
+.widget iframe { display: block; width: 100%; border: none; background: transparent; }
+.widget-shield { position: absolute; inset: 0; cursor: grab; }
+.widget.active { outline: 1px dashed rgba(125, 207, 255, 0.35); outline-offset: 2px; border-radius: 4px; }
+.widget-error {
+  display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 5px 8px; border-radius: 6px;
+  background: var(--del-bg); color: var(--del-fg); font-size: 12px;
+}
+.widget-error .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.widget-error button { flex: none; font-size: 11.5px; padding: 1px 8px; }
+
 /* 折叠状态下的动画/差异浮层：浮在节点下方，不挤动整体排版 */
 .float-panel {
   position: absolute; left: -1px; right: -1px; top: calc(100% + 6px);

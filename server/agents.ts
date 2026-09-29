@@ -23,7 +23,8 @@ const CANVAS_RULES = `白板是一棵（或几棵）思维树，面向内容而�
 - 修改已有内容时用 canvas_edit_node 的 edits 做小范围替换，让用户看清改了哪里；需要调整层级时用 canvas_move_node。
 - 节点之间的关系用 canvas_link，并写上简短的关系文字（如「导致」「依赖」「反例」），双向关系可以给两个方向写不同的文字。
 - 兄弟节点之间如果其实是「前提 → 展开」「总 → 分」的关系，用 canvas_move_node 形成上下层级，而不是连线。
-- 新建前先看白板索引，避免重复，已有的节点就在原处补充或修改。`;
+- 新建前先看白板索引，避免重复，已有的节点就在原处补充或修改。
+- 图表、SVG 插图、结构示意、交互演示、对白板内容的自定义可视化等文字说不清的内容，用 canvas_create_widget 做成组件节点；工具结果会告诉你运行是否报错，报错就修好。`;
 
 const MAIN_PROMPT = `你是「思考板」里的 AI 搭档，和用户一起高频快速地思考、迭代。
 
@@ -125,6 +126,9 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
     case "canvas_create_node":
       // 流式生成时标题可能还没写出来
       label = args?.title ? `新建「${args.title}」` : "新建节点…";
+      break;
+    case "canvas_create_widget":
+      label = args?.title ? `新建组件「${args.title}」` : "新建组件…";
       break;
     case "canvas_edit_node":
       label = `修改 ${name(args?.id)}`;
@@ -279,7 +283,12 @@ export class MainAgent {
     if (selected.length) {
       parts.push(
         "[用户选中的节点]\n" +
-          selected.map((n) => `<node id="${n.id}" title="${n.title}" summary="${n.summary}">\n${n.md}\n</node>`).join("\n"),
+          selected
+            .map((n) => {
+              const tag = n.kind === "widget" ? "widget" : "node";
+              return `<${tag} id="${n.id}" title="${n.title}" summary="${n.summary}">\n${n.md}\n</${tag}>`;
+            })
+            .join("\n"),
       );
     }
     parts.push(`[用户消息]\n${text}`);

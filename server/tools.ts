@@ -2,6 +2,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { firstLine, type BoardStore } from "./store.ts";
 import type { TaskKind } from "./types.ts";
+import { WIDGET_GUIDE } from "./widget.ts";
 
 export interface ToolContext {
   store: BoardStore;
@@ -23,6 +24,13 @@ function must(ctx: ToolContext, id: string) {
   const node = ctx.store.resolve(id);
   if (!node) throw new Error(`节点 ${id} 不存在，先用 canvas_list 查看`);
   return node;
+}
+
+/** 等前端跑完组件，把运行结果告诉模型 */
+async function widgetReport(ctx: ToolContext, id: string) {
+  const r = await ctx.store.waitWidget(id);
+  if (!r) return "（暂未收到运行结果：用户可能没有打开这个白板，或节点处于折叠状态）";
+  return r.error ? `运行报错，请用 canvas_edit_node 修复：\n${r.error}` : "运行正常";
 }
 
 function parentOf(ctx: ToolContext, parentId: string | null | undefined) {
@@ -50,6 +58,10 @@ export function createCanvasTools(ctx: ToolContext) {
         ids
           .map((id) => {
             const n = must(ctx, id);
+            if (n.kind === "widget") {
+              const error = ctx.store.widgetResult(n.id)?.error;
+              return `<widget id="${n.id}" parent="${n.parentId ?? "root"}" title="${n.title}" summary="${n.summary}">\n${n.md}\n</widget>${error ? `\n<runtime-error>\n${error}\n</runtime-error>` : ""}`;
+            }
             return `<node id="${n.id}" parent="${n.parentId ?? "root"}" title="${n.title}" summary="${n.summary}">\n${n.md}\n</node>`;
           })
           .join("\n\n"),
@@ -82,11 +94,36 @@ export function createCanvasTools(ctx: ToolContext) {
     },
   });
 
+  const createWidget = defineTool({
+    name: "canvas_create_widget",
+    label: "新建组件",
+    description: `在思维树上新建一个组件节点：一段自己写的 HTML/CSS/JS，在白板上直接运行，用于图表、SVG 插图、流程/结构示意、交互演示、小计算器、白板内容的自定义可视化等文字说不清的内容。\n${WIDGET_GUIDE}`,
+    parameters: Type.Object({
+      parentId: Type.Optional(
+        Type.String({ description: "父节点 id；传 root 表示新的主题。省略时挂在用户选中的节点下（没选中则为新主题）" }),
+      ),
+      title: Type.String({ description: "简短标题，≤ 16 字" }),
+      summary: Type.String({ description: "一句话说明这个组件展示什么，≤ 40 字，折叠时展示" }),
+      code: Type.String({ description: "组件的 HTML 代码" }),
+    }),
+    execute: async (toolCallId, { title, summary, code, parentId }) => {
+      const parent = parentOf(ctx, parentId);
+      const init = { kind: "widget" as const, title, summary, md: code, parentId: parent, open: true };
+      const draftId = ctx.claimDraft?.(toolCallId);
+      let id: string;
+      if (draftId) {
+        ctx.store.updateNode(draftId, { ...init, draft: false });
+        id = draftId;
+      } else id = ctx.store.createNode(init, true).id;
+      return result(`已创建组件 ${id}，${await widgetReport(ctx, id)}`, id);
+    },
+  });
+
   const edit = defineTool({
     name: "canvas_edit_node",
     label: "修改节点",
     description:
-      "修改已有节点。正文优先用 edits 做局部替换（old 必须在原文中唯一出现），让用户看清改了哪里；只有大改时才传 md 整体重写。",
+      "修改已有节点。正文优先用 edits 做局部替换（old 必须在原文中唯一出现），让用户看清改了哪里；只有大改时才传 md 整体重写。组件节点的 md 就是它的 HTML 代码，同样用 edits / md 修改。",
     parameters: Type.Object({
       id: Type.String(),
       edits: Type.Optional(
@@ -107,8 +144,12 @@ export function createCanvasTools(ctx: ToolContext) {
       }
       if (title !== undefined && title !== node.title) ctx.store.updateNode(node.id, { title });
       if (summary !== undefined) ctx.store.editNode(node.id, summary, ctx.by, "summary");
-      if (next !== node.md) ctx.store.editNode(node.id, next, ctx.by);
-      return result(`已修改节点 ${node.id}`, node.id);
+      if (next === node.md) return result(`已修改节点 ${node.id}`, node.id);
+      ctx.store.editNode(node.id, next, ctx.by);
+      if (node.kind !== "widget") return result(`已修改节点 ${node.id}`, node.id);
+      // 展开才会运行，也让用户看到改动的效果
+      if (!node.open) ctx.store.updateNode(node.id, { open: true });
+      return result(`已修改组件 ${node.id}，${await widgetReport(ctx, node.id)}`, node.id);
     },
   });
 
@@ -174,7 +215,7 @@ export function createCanvasTools(ctx: ToolContext) {
     },
   });
 
-  const tools = [list, read, create, edit, move, del, link, unlink];
+  const tools = [list, read, create, createWidget, edit, move, del, link, unlink];
 
   if (ctx.dispatch) {
     const dispatch = ctx.dispatch;

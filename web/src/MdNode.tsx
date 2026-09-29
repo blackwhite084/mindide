@@ -7,6 +7,7 @@ import { animator, computeSegs, type Frame, type Seg } from "./animator.ts";
 import { client, summaryOf } from "./client.ts";
 import { fullText } from "./compare.ts";
 import { ui } from "./ui.ts";
+import { WidgetFrame } from "./WidgetFrame.tsx";
 
 export type MdFlowNode = Node<
   {
@@ -96,6 +97,8 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
   const [draftMd, setDraftMd] = useState("");
   const [showDiff, setShowDiff] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
+  const [runKey, setRunKey] = useState(0);
+  const widget = node.kind === "widget";
   useEffect(() => {
     if (!diff) setShowCompare(false);
   }, [diff]);
@@ -152,7 +155,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
   };
 
   const summary = waitingSum ?? summaryOf(node);
-  const hasMore = !!node.md.trim() && node.md.trim() !== summaryOf(node);
+  const hasMore = !!node.md.trim() && (widget || node.md.trim() !== summaryOf(node));
   const summaryView = sumFrame ? (
     <div className="summary">
       <DiffText segs={sumFrame.segs} frame={sumFrame} />
@@ -167,9 +170,16 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         ref={taRef}
         className="editor nodrag nowheel"
         value={draftMd}
-        placeholder="正文（Markdown）"
+        placeholder={widget ? "组件代码（HTML）" : "正文（Markdown）"}
         onChange={(e) => setDraftMd(e.target.value)}
       />
+    );
+  } else if (widget && open && !mdFrame && node.md.trim()) {
+    body = (
+      <>
+        {summaryView ?? (node.summary && <div className="summary">{node.summary}</div>)}
+        <WidgetFrame node={node} active={!!selected} runKey={runKey} />
+      </>
     );
   } else if (open && (mdFrame || waitingMd !== undefined || node.md.trim())) {
     body = (
@@ -189,7 +199,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
       <div className="summary">
         {summary}
         <span className="caret" />
-        {node.md && <div className="draft-meta">正文 {node.md.length} 字</div>}
+        {node.md && <div className="draft-meta">{widget ? "代码" : "正文"} {node.md.length} 字</div>}
       </div>
     );
   } else if (summary) {
@@ -280,6 +290,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         <>
           <div className="mdnode-head" onDoubleClick={toggleOpen}>
             {node.kind === "task" && <span className="kind">报告</span>}
+            {widget && <span className="kind widget">组件</span>}
             {node.draft && <span className="kind drafting">AI 正在写</span>}
             {pending && !frame && !node.draft && <span className="kind drafting">AI 准备修改</span>}
             <span className="title">{node.title || summary.slice(0, 16) || "未命名"}</span>
@@ -311,10 +322,15 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
                 已改
               </button>
             )}
+            {widget && open && !node.draft && (
+              <button className="icon nodrag" title="重新运行" onClick={() => setRunKey((k) => k + 1)}>
+                ↻
+              </button>
+            )}
             {hasMore && detail === "summary" && (
               <button
                 className="icon nodrag"
-                title={node.open ? "收起正文" : "展开正文"}
+                title={widget ? (node.open ? "收起组件" : "运行组件") : node.open ? "收起正文" : "展开正文"}
                 onClick={() => client.patchNode(node.id, { open: !node.open })}
               >
                 {node.open ? "▴" : "▾"}
@@ -323,7 +339,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
           </div>
           <div
             ref={bodyRef}
-            className={`mdnode-body ${open ? "nowheel" : ""}`}
+            className={`mdnode-body ${open && !widget ? "nowheel" : ""}`}
             onDoubleClick={toggleOpen}
           >
             {body}

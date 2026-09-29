@@ -27,6 +27,11 @@ export function toMarkdown(nodes: BoardNode[], edges: BoardEdge[]): string {
       else out.push(`${"  ".repeat(depth - 6)}- **${title}**`, "");
       if (n.summary && n.summary !== title) out.push(`> ${n.summary}`, "");
       // 正文里的标题降级，避免打乱导出的层级
+      if (n.kind === "widget") {
+        if (n.md.trim()) out.push("```html", n.md.trim(), "```", "");
+        walk(n.id, depth + 1);
+        continue;
+      }
       const body = n.md.trim().replace(/^(#{1,6})\s/gm, (_m, h: string) => `${"#".repeat(Math.min(6, h.length + depth + 1))} `);
       if (body) out.push(body, "");
       walk(n.id, depth + 1);
@@ -168,7 +173,7 @@ export function fromJSON(text: string): Fragment {
         summary: String(n.summary ?? ""),
         md: String(n.md ?? ""),
         parentId: n.parentId ?? null,
-        kind: n.kind === "task" ? "task" : "note",
+        kind: n.kind === "task" || n.kind === "widget" ? n.kind : "note",
       })),
     edges: (src.edges ?? [])
       .filter((e: any) => e && e.source && e.target)

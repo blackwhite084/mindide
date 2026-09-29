@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 组件节点的 iframe 只能用 srcdoc，不能跳转到任何地址（防止把白板数据带出去），见 WidgetFrame.tsx -->
+    <meta http-equiv="Content-Security-Policy" content="frame-src 'none'" />
     <title>AI Minder</title>
   </head>
   <body>

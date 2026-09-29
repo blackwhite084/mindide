@@ -1,7 +1,7 @@
 // 前后端共享的数据结构
 
-/** note：普通内容节点；task：后台任务产出的报告 */
-export type NodeKind = "note" | "task";
+/** note：普通内容节点；task：后台任务产出的报告；widget：组件，md 里是在沙箱中运行的 HTML */
+export type NodeKind = "note" | "task" | "widget";
 
 export interface Activity {
   id: string;
@@ -212,5 +212,7 @@ export type ClientMsg =
   | { type: "sources:remove"; id: string }
   | { type: "sources:bash"; id: string; allow: boolean }
   | { type: "recentDirs:forget"; path: string }
+  /** 组件节点在前端运行后的结果（hash 对应运行的那版代码） */
+  | { type: "widget:status"; id: string; hash: string; error: string | null }
   | { type: "model:set"; key: string }
   | { type: "thinking:set"; level: ThinkingLevel };

@@ -23,13 +23,17 @@ export class DraftTracker {
 
   /** 处理流式中的工具调用（partial.content 里的 toolCall） */
   update(toolCall: { id: string; name: string; arguments?: any }, final = false) {
-    if (toolCall.name !== "canvas_create_node") return;
-    const args = toolCall.arguments ?? {};
+    const widget = toolCall.name === "canvas_create_widget";
+    if (toolCall.name !== "canvas_create_node" && !widget) return;
+    const raw = toolCall.arguments ?? {};
+    // 组件的代码放在 md 里
+    const args = widget ? { ...raw, md: raw.code } : raw;
     const existing = this.drafts.get(toolCall.id);
     if (!existing) {
       if (!args.title) return;
       const node = this.store.createNode({
         draft: true,
+        kind: widget ? "widget" : "note",
         title: String(args.title),
         summary: String(args.summary ?? ""),
         md: String(args.md ?? ""),
