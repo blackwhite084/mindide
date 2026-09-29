@@ -2,6 +2,7 @@ import type {
   Board,
   BoardMeta,
   ModelInfo,
+  Source,
   ThinkingLevel,
   BoardEdge,
   BoardNode,
@@ -31,6 +32,7 @@ export interface ClientState {
   models: ModelInfo[];
   model: string | null;
   thinking: ThinkingLevel;
+  sources: Source[];
 }
 
 type Listener = () => void;
@@ -52,6 +54,7 @@ class Client {
     models: [],
     model: null,
     thinking: "low",
+    sources: [],
   };
   private listeners = new Set<Listener>();
   private ws: WebSocket | undefined;
@@ -102,6 +105,9 @@ class Client {
       case "board:replace":
         animator.reset();
         this.loadBoard(msg.board);
+        break;
+      case "sources":
+        this.set({ sources: msg.sources });
         break;
       case "boards":
         this.set({ boards: msg.boards, board: msg.current });
@@ -201,6 +207,16 @@ class Client {
     nodes.set(id, { ...n, ...patch });
     this.set({ nodes });
     this.send({ type: "node:update", id, patch });
+  }
+
+  /** 上传参考资料到当前白板 */
+  async uploadSources(files: File[]) {
+    const form = new FormData();
+    for (const f of files) form.append("files", f, f.name);
+    const res = await fetch(`/api/boards/${this.state.board}/sources`, { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error ?? `上传失败（${res.status}）`);
+    return data as { added: string[]; rejected: string[] };
   }
 
   createNode(parentId: string | null, pos?: { x: number; y: number }) {

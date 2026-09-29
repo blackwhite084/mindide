@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { MainAgent, TaskRunner } from "./agents.ts";
+import { SourceLibrary } from "./sources.ts";
 import { BoardStore } from "./store.ts";
 import type { ClientMsg, ServerMsg } from "./types.ts";
 import { VersionTree } from "./versions.ts";
@@ -13,6 +14,7 @@ export class Workspace {
   readonly tasks: TaskRunner;
   readonly main: MainAgent;
   readonly versions: VersionTree;
+  readonly sources: SourceLibrary;
   private manualTimer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -20,8 +22,10 @@ export class Workspace {
     dir: string,
   ) {
     this.store = new BoardStore(join(dir, "board.json"));
-    this.tasks = new TaskRunner(this.store);
-    this.main = new MainAgent(this.store, this.tasks);
+    this.sources = new SourceLibrary(dir);
+    this.sources.onChange = () => this.store.emit({ type: "sources", sources: this.sources.list() });
+    this.tasks = new TaskRunner(this.store, this.sources);
+    this.main = new MainAgent(this.store, this.tasks, this.sources);
     this.versions = new VersionTree(join(dir, "versions.json"), this.store);
   }
 
@@ -50,6 +54,7 @@ export class Workspace {
         busy: this.main.busy,
       },
       { type: "versions", versions: this.versions.metas(), head: this.versions.head },
+      { type: "sources", sources: this.sources.list() },
     ];
   }
 
@@ -136,6 +141,12 @@ export class Workspace {
         versions.commit(`导入：${msg.name}`, main.messages, true);
         break;
       }
+      case "sources:addDir":
+        await this.sources.addDir(msg.path);
+        break;
+      case "sources:remove":
+        this.sources.remove(msg.id);
+        break;
       case "version:save":
         versions.commit(msg.label || "手动保存", main.messages, true);
         break;

@@ -118,6 +118,22 @@ export interface ModelInfo {
   reasoning: boolean;
 }
 
+/** 参考资料：上传的文件，或本地目录（例如代码库） */
+export interface Source {
+  id: string;
+  kind: "file" | "dir";
+  name: string;
+  /** 文件：存储路径；目录：绝对路径 */
+  path: string;
+  size: number;
+  /** PDF 页数 / 目录文件数 */
+  pages?: number;
+  files?: number;
+  status: "processing" | "ready" | "error";
+  error?: string;
+  addedAt: number;
+}
+
 export interface VersionMeta {
   id: string;
   parentId: string | null;
@@ -143,6 +159,7 @@ export type ServerMsg =
   | { type: "chat:upsert"; entry: ChatEntry }
   | { type: "chat:delta"; id: string; delta: string; field?: "text" | "thinking" }
   | { type: "boards"; boards: BoardMeta[]; current: string }
+  | { type: "sources"; sources: Source[] }
   | { type: "models"; models: ModelInfo[]; current: string | null; thinking: ThinkingLevel }
   | { type: "queue"; queue: QueueState }
   | { type: "busy"; busy: boolean }
@@ -181,5 +198,7 @@ export type ClientMsg =
   | { type: "boards:create"; name: string }
   | { type: "boards:rename"; id: string; name: string }
   | { type: "boards:delete"; id: string }
+  | { type: "sources:addDir"; path: string }
+  | { type: "sources:remove"; id: string }
   | { type: "model:set"; key: string }
   | { type: "thinking:set"; level: ThinkingLevel };

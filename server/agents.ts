@@ -12,6 +12,8 @@ import { firstLine, type BoardStore } from "./store.ts";
 import { DraftTracker } from "./drafts.ts";
 import { createCanvasTools, type ToolContext } from "./tools.ts";
 import { settings } from "./settings.ts";
+import { createSourceTools } from "./sourceTools.ts";
+import type { SourceLibrary } from "./sources.ts";
 import type { Activity, BoardNode, ModelInfo, Task, TaskKind, ThinkingLevel } from "./types.ts";
 import { WEB_TOOLS } from "./web.ts";
 
@@ -33,10 +35,11 @@ ${CANVAS_RULES}
 - 用户选中的节点是当前关注点，新内容默认挂在它下面。
 - 需要最新信息或核实事实时，用 web_search 联网搜索（必要时 web_fetch 读原文），把来源链接写进节点正文。
 - 耗时较长的调研或大规模整理，用 dispatch_task 派给后台 agent。
+- 用户提供了参考资料（文件、代码库目录）时，用 source_search 定位、source_read 阅读、source_tree 看目录结构，结论写进节点并注明出处（文件名:行号 或 页码）。不要凭空猜测资料内容。
 - 用中文，直接、紧凑。用户可能在你工作时继续追加或插入消息，请自然衔接。`;
 
 const TASK_PROMPTS: Record<TaskKind, string> = {
-  research: `你是后台调研 agent。根据任务说明联网搜索（web_search，必要时 web_fetch 读原文），多角度收集信息。
+  research: `你是后台调研 agent。根据任务说明联网搜索（web_search，必要时 web_fetch 读原文），多角度收集信息；用户提供了参考资料时，也用 source_search / source_read 查阅，并注明出处。
 最终回答是一份中文 Markdown 报告，会作为节点放进白板：第一行用一句话写核心结论（纯文本，不加标题符号），之后分节列要点，最后附来源链接。
 可以用 canvas_read 读取相关节点作为背景。`,
   organize: `你是后台整理 agent，负责整理白板内容。
@@ -70,7 +73,7 @@ export async function resolveModel(key: string | undefined) {
 const thinkingFor = (model: { reasoning?: boolean } | undefined): ThinkingLevel =>
   model?.reasoning ? settings.thinking : "off";
 
-async function makeSession(systemPrompt: string, ctx: ToolContext, withWeb: boolean) {
+async function makeSession(systemPrompt: string, ctx: ToolContext, withWeb: boolean, sources?: SourceLibrary) {
   const loader = new DefaultResourceLoader({
     cwd: process.cwd(),
     agentDir: getAgentDir(),
@@ -81,7 +84,11 @@ async function makeSession(systemPrompt: string, ctx: ToolContext, withWeb: bool
     noContextFiles: true,
   });
   await loader.reload();
-  const customTools = [...createCanvasTools(ctx), ...(withWeb ? WEB_TOOLS : [])];
+  const customTools = [
+    ...createCanvasTools(ctx),
+    ...(withWeb ? WEB_TOOLS : []),
+    ...(sources ? createSourceTools(sources) : []),
+  ];
   const model = await resolveModel(settings.model);
   const { session } = await createAgentSession({
     sessionManager: SessionManager.inMemory(),
@@ -141,6 +148,18 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
       break;
     case "dispatch_task":
       label = `派发任务「${args?.title ?? ""}」`;
+      break;
+    case "source_list":
+      label = "查看资料清单";
+      break;
+    case "source_tree":
+      label = `查看目录 ${args?.path || "/"}`;
+      break;
+    case "source_read":
+      label = `阅读 ${args?.path ?? "资料"}${args?.offset > 1 ? `（从第 ${args.offset} 行）` : ""}`;
+      break;
+    case "source_search":
+      label = `搜索资料：${args?.query ?? ""}`;
       break;
   }
   const resolved = nodeId ? store.resolve(nodeId)?.id : undefined;
@@ -213,6 +232,7 @@ export class MainAgent {
   constructor(
     private store: BoardStore,
     private tasks: TaskRunner,
+    private sources?: SourceLibrary,
   ) {}
 
   async init() {
@@ -225,7 +245,7 @@ export class MainAgent {
       claimDraft: (id) => this.drafts.claim(id),
       dispatch: (kind, title, instructions, ids) => this.tasks.run(kind, title, instructions, ids.length ? ids : this.focus),
     };
-    this.session = await makeSession(MAIN_PROMPT, ctx, true);
+    this.session = await makeSession(MAIN_PROMPT, ctx, true, this.sources);
     this.session.subscribe((e) => this.onEvent(e));
     const m = this.session.model;
     console.log(`[main] model ${m?.provider}/${m?.id}`);
@@ -250,6 +270,8 @@ export class MainAgent {
 
   private composePrompt(text: string, contextNodeIds: string[]) {
     const parts = [`[白板索引]\n${this.store.outline()}`];
+    const sources = this.sources?.outline();
+    if (sources) parts.push(`[参考资料]\n${sources}`);
     const selected = contextNodeIds.map((id) => this.store.get(id)).filter(Boolean) as BoardNode[];
     if (selected.length) {
       parts.push(
@@ -409,7 +431,10 @@ export class TaskRunner {
   private sessions = new Map<string, AgentSession>();
   onFinished: ((task: Task) => void) | undefined;
 
-  constructor(private store: BoardStore) {}
+  constructor(
+    private store: BoardStore,
+    private sources?: SourceLibrary,
+  ) {}
 
   run(kind: TaskKind, title: string, instructions: string, contextNodeIds: string[]): string {
     const task: Task = {
@@ -441,7 +466,7 @@ export class TaskRunner {
       defaultParent: () => anchor,
       claimDraft: (id) => drafts.claim(id),
     };
-    const session = await makeSession(TASK_PROMPTS[task.kind], ctx, task.kind === "research");
+    const session = await makeSession(TASK_PROMPTS[task.kind], ctx, task.kind === "research", this.sources);
     this.sessions.set(task.id, session);
 
     let lastText = "";
@@ -484,7 +509,8 @@ export class TaskRunner {
       .filter(Boolean)
       .map((n) => `<node id="${n!.id}" title="${n!.title}">\n${n!.md}\n</node>`)
       .join("\n");
-    const prompt = `[任务] ${task.title}\n\n${task.instructions}${ctxText ? `\n\n[相关节点]\n${ctxText}` : ""}\n\n[白板索引]\n${this.store.outline()}`;
+    const sources = this.sources?.outline();
+    const prompt = `[任务] ${task.title}\n\n${task.instructions}${ctxText ? `\n\n[相关节点]\n${ctxText}` : ""}\n\n[白板索引]\n${this.store.outline()}${sources ? `\n\n[参考资料]\n${sources}` : ""}`;
 
     await session.prompt(prompt);
     await session.agent.waitForIdle();

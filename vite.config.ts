@@ -6,7 +6,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    proxy: { "/ws": { target: "ws://127.0.0.1:5174", ws: true } },
+    proxy: {
+      "/ws": { target: "ws://127.0.0.1:5174", ws: true },
+      "/api": { target: "http://127.0.0.1:5174" },
+    },
   },
   build: { outDir: "dist", emptyOutDir: true },
 });

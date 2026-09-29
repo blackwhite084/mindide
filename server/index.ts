@@ -1,8 +1,12 @@
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
+import multipart from "@fastify/multipart";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { isSupported } from "./sources.ts";
 import { listModels } from "./agents.ts";
 import { BoardManager } from "./boards.ts";
 import { saveSettings, settings } from "./settings.ts";
@@ -28,8 +32,46 @@ async function modelsMsg(): Promise<ServerMsg> {
 
 boards.onChange = broadcastBoards;
 
-const app = Fastify();
+const app = Fastify({ bodyLimit: 1024 * 1024 });
 await app.register(websocket);
+await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024, files: 50 } });
+
+/** 上传参考资料（可多选）。以后做成产品时，上传整个文件夹也走这里 */
+app.post<{ Params: { board: string } }>("/api/boards/:board/sources", async (req, reply) => {
+  if (!boards.has(req.params.board)) return reply.code(404).send({ error: "白板不存在" });
+  const ws = await boards.get(req.params.board);
+  const added: string[] = [];
+  const rejected: string[] = [];
+  for await (const part of req.files()) {
+    if (!isSupported(part.filename)) {
+      rejected.push(part.filename);
+      part.file.resume();
+      continue;
+    }
+    const buf = await part.toBuffer();
+    // 提取文字可能较慢，后台处理，状态通过 sources 消息推送
+    ws.sources.addUpload(part.filename, buf);
+    added.push(part.filename);
+  }
+  return { added, rejected };
+});
+
+/** 本地目录浏览（选择代码库等目录用，仅本机服务） */
+app.get<{ Querystring: { path?: string } }>("/api/fs/dirs", async (req, reply) => {
+  const raw = req.query.path?.trim() || homedir();
+  const abs = resolve(raw.replace(/^~(?=$|\/)/, homedir()));
+  try {
+    const entries = await readdir(abs, { withFileTypes: true });
+    const dirs = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b));
+    const markers = entries.filter((e) => [".git", "package.json", "pyproject.toml", "go.mod", "Cargo.toml"].includes(e.name)).map((e) => e.name);
+    return { path: abs, parent: dirname(abs) === abs ? null : dirname(abs), dirs, project: markers.length > 0, home: homedir() };
+  } catch (err: any) {
+    return reply.code(400).send({ error: `无法读取目录：${abs}` });
+  }
+});
 
 const dist = resolve("web/dist");
 if (existsSync(dist)) await app.register(fastifyStatic, { root: dist });

@@ -16,8 +16,29 @@ function contentNodes() {
   return [...client.state.nodes.values()].filter((n) => !n.draft);
 }
 
-/** 打开导入确认：JSON 可替换或合并；Markdown 合并到选中节点下或作为新主题 */
-function confirmImport(frag: Fragment, name: string, kind: "json" | "md", selected: string[], at: { x: number; y: number }) {
+const uploadAsSource = (files: File[], at: { x: number; y: number }) =>
+  client
+    .uploadSources(files)
+    .then(({ added, rejected }) =>
+      ui.openMenu({
+        ...at,
+        items: [
+          { title: added.length ? `已作为参考资料添加 ${added.length} 个文件，可在侧栏「资料」查看` : "没有可添加的文件" },
+          ...(rejected.length ? [{ title: `不支持：${rejected.join("、")}` }] : []),
+        ],
+      }),
+    )
+    .catch((err) => ui.openMenu({ ...at, items: [{ title: String(err?.message ?? err) }] }));
+
+/** 打开导入确认：JSON 可替换或合并；Markdown 合并到选中节点下、作为新主题，或作为参考资料 */
+function confirmImport(
+  frag: Fragment,
+  name: string,
+  kind: "json" | "md",
+  selected: string[],
+  at: { x: number; y: number },
+  file?: File,
+) {
   if (!frag.nodes.length) {
     ui.openMenu({ ...at, items: [{ title: "文件里没有可导入的内容" }] });
     return;
@@ -34,16 +55,21 @@ function confirmImport(frag: Fragment, name: string, kind: "json" | "md", select
       ...(kind === "json"
         ? [{ sep: true } as const, { label: "替换当前白板", danger: true, hint: "会先自动存版本", onClick: () => send("replace") }]
         : []),
+      ...(kind === "md" && file
+        ? [{ sep: true } as const, { label: "不拆成节点，作为参考资料", onClick: () => uploadAsSource([file], at) }]
+        : []),
     ],
   });
 }
 
 async function importFile(file: File, selected: string[], at: { x: number; y: number }) {
+  // 非 Markdown / JSON（PDF、Word、代码……）直接作为参考资料
+  if (!/\.(json|md|markdown)$/i.test(file.name)) return uploadAsSource([file], at);
   const text = await file.text();
   const name = file.name.replace(/\.[^.]+$/, "");
   try {
     if (/\.json$/i.test(file.name)) confirmImport(fromJSON(text), name, "json", selected, at);
-    else confirmImport(fromMarkdown(text, name), name, "md", selected, at);
+    else confirmImport(fromMarkdown(text, name), name, "md", selected, at, file);
   } catch (err: any) {
     ui.openMenu({ ...at, items: [{ title: `无法导入：${err?.message ?? err}` }] });
   }
@@ -91,10 +117,13 @@ export function FileMenu({ selected }: { selected: string[] }) {
     const leave = () => stage.classList.remove("dropping");
     const drop = (e: DragEvent) => {
       leave();
-      const file = e.dataTransfer?.files?.[0];
-      if (!file) return;
+      const files = [...(e.dataTransfer?.files ?? [])];
+      if (!files.length) return;
       e.preventDefault();
-      importFile(file, selectedRef.current, { x: e.clientX, y: e.clientY });
+      const at = { x: e.clientX, y: e.clientY };
+      // 一次拖多个文件：全部作为参考资料
+      if (files.length > 1) uploadAsSource(files, at);
+      else importFile(files[0], selectedRef.current, at);
     };
     stage.addEventListener("dragover", over);
     stage.addEventListener("dragleave", leave);
@@ -133,7 +162,7 @@ export function FileMenu({ selected }: { selected: string[] }) {
           label: "打开文件…",
           hint: "也可拖到画布",
           onClick: async () => {
-            const file = await pickFile(".json,.md,.markdown,.txt");
+            const file = await pickFile(".json,.md,.markdown");
             if (file) importFile(file, selected, at);
           },
         },
