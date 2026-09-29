@@ -7,7 +7,7 @@ import { Composer } from "./Composer.tsx";
 import { ContextMenu } from "./ContextMenu.tsx";
 import { FileMenu } from "./FileMenu.tsx";
 import { SearchPalette } from "./SearchPalette.tsx";
-import { BoardSwitcher, ModelMenu } from "./TopbarMenus.tsx";
+import { BoardSwitcher, ModelMenu, NewBoardButton } from "./TopbarMenus.tsx";
 import { TaskPanel } from "./TaskPanel.tsx";
 import { VersionPanel } from "./VersionPanel.tsx";
 
@@ -53,6 +53,7 @@ function Shell() {
           AI Minder
           <span className="brand-sep">/</span>
           <BoardSwitcher state={state} />
+          <NewBoardButton />
         </div>
         <div className="topbar-actions">
           <ModelMenu state={state} />
@@ -83,8 +84,15 @@ function Shell() {
       <main className="stage">
         <Canvas state={state} follow={follow} detail={detail} onSelectionChange={onSelectionChange} />
         {state.nodes.size === 0 && (
-          <div className="hint">
-            在下方输入想法开始 · 双击节点展开 · 右键更多操作 · 拖到别的节点上可调整层级
+          <div className="empty-board">
+            <div className="empty-title">空白板</div>
+            <div className="muted">在下方直接说出你的想法，AI 会把内容整理成节点</div>
+            <button className="primary" onClick={() => client.createNode(null)}>
+              ＋ 手动新建主题
+            </button>
+            <div className="empty-tips">
+              双击空白处新建主题 · 选中节点按 Tab 加子节点 · 双击节点展开 · 右键更多操作
+            </div>
           </div>
         )}
         <Composer

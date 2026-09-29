@@ -135,6 +135,35 @@ export function BoardSwitcher({ state }: { state: ClientState }) {
   );
 }
 
+/** 顶栏上显眼的「新白板」按钮 */
+export function NewBoardButton() {
+  return (
+    <button
+      className="ghost new-board"
+      title="新建白板"
+      onClick={(e) => {
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        ui.openMenu({
+          x: r.left,
+          y: r.bottom + 6,
+          items: [],
+          form: (
+            <TextForm
+              title="新建白板"
+              placeholder="白板名称（可留空，稍后按主题自动命名）"
+              confirm="创建"
+              allowEmpty
+              onSubmit={(name) => client.send({ type: "boards:create", name })}
+            />
+          ),
+        });
+      }}
+    >
+      ＋ 新白板
+    </button>
+  );
+}
+
 const THINKING: { level: ClientState["thinking"]; label: string }[] = [
   { level: "off", label: "不思考" },
   { level: "low", label: "少量思考" },

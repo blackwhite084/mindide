@@ -430,3 +430,13 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .rel-label { transition: opacity 0.25s; }
 .rel-label.dim { opacity: 0.15; }
 .rel-label.hl { border-color: #c0caf5; color: var(--text); }
+
+/* ---------- 新建入口 ---------- */
+.new-board { font-size: 12.5px; color: var(--accent); margin-left: 2px; }
+.ctrl-plus { font-size: 15px; line-height: 1; color: var(--text); }
+.empty-board {
+  position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; z-index: 5;
+}
+.empty-title { font-size: 18px; font-weight: 600; color: var(--text); }
+.empty-tips { font-size: 12px; color: var(--muted); margin-top: 6px; }

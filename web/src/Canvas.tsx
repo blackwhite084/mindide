@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
+  ControlButton,
   Controls,
   MiniMap,
   MarkerType,
@@ -374,6 +375,12 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         else e.preventDefault();
       }}
       onPaneContextMenu={paneMenu}
+      onDoubleClick={(e) => {
+        // 双击空白处新建主题（双击节点是展开）
+        if (!(e.target as HTMLElement).classList.contains("react-flow__pane")) return;
+        const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        client.createNode(null, { x: Math.round(p.x), y: Math.round(p.y) });
+      }}
       onEdgeDoubleClick={(e, edge) => {
         const be = state.edges.get(edge.id);
         if (!be) return;
@@ -418,7 +425,17 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         nodeBorderRadius={6}
         nodeColor={(n) => (n.data as MdFlowNode["data"]).color}
       />
-      <Controls showInteractive={false} />
+      <Controls showInteractive={false}>
+        <ControlButton
+          title="新建：选中节点时加子节点，否则新建主题"
+          onClick={() => {
+            const sel = rf.getNodes().filter((n) => n.selected);
+            client.createNode(sel.length === 1 ? sel[0].id : null);
+          }}
+        >
+          <span className="ctrl-plus">＋</span>
+        </ControlButton>
+      </Controls>
     </ReactFlow>
   );
 }
