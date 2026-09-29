@@ -18,7 +18,9 @@ const CANVAS_RULES = `白板是一棵（或几棵）思维树，面向内容而�
 - 一个节点只讲一个要点：标题 ≤ 16 字，summary 是一句话要点（≤ 40 字），md 是可展开的细节。
 - 用层级表达结构：主题 → 分支 → 细节。复杂内容拆成父节点 + 子节点，不要把一大篇塞进一个节点。
 - 修改已有内容时用 canvas_edit_node 的 edits 做小范围替换，让用户看清改了哪里；需要调整层级时用 canvas_move_node。
-- 跨分支的关系用 canvas_link。新建前先看白板索引，避免重复，已有的节点就在原处补充或修改。`;
+- 节点之间的关系用 canvas_link，并写上简短的关系文字（如「导致」「依赖」「反例」），双向关系可以给两个方向写不同的文字。
+- 兄弟节点之间如果其实是「前提 → 展开」「总 → 分」的关系，用 canvas_move_node 形成上下层级，而不是连线。
+- 新建前先看白板索引，避免重复，已有的节点就在原处补充或修改。`;
 
 const MAIN_PROMPT = `你是「思考板」里的 AI 搭档，和用户一起高频快速地思考、迭代。
 
@@ -103,9 +105,14 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
     case "canvas_delete_node":
       label = `删除 ${name(args?.id)}`;
       break;
-    case "canvas_link":
-      label = `关联 ${name(args?.source)} ↔ ${name(args?.target)}`;
+    case "canvas_link": {
+      const arrow = args?.bidirectional || args?.reverseLabel ? "↔" : "→";
+      label = `关系 ${name(args?.source)} ${arrow} ${name(args?.target)}${args?.label ? `：${args.label}` : ""}`;
       nodeId = args?.target;
+      break;
+    }
+    case "canvas_unlink":
+      label = `删除关系 ${name(args?.source)} — ${name(args?.target)}`;
       break;
     case "dispatch_task":
       label = `派发任务「${args?.title ?? ""}」`;

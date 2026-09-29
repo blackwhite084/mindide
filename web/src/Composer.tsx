@@ -70,7 +70,15 @@ function StatusLine({ state, chatVisible, onOpenChat }: Pick<Props, "state" | "c
 
 export function Composer({ state, selected, onClearSelection, chatVisible, onOpenChat }: Props) {
   const [text, setText] = useState("");
+  const [hint, setHint] = useState<string | undefined>();
   const ta = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    ui.focusComposer = (placeholder) => {
+      setHint(placeholder);
+      requestAnimationFrame(() => ta.current?.focus());
+    };
+  }, []);
   const { queue, busy } = state;
   const queued = [...queue.steering.map((t) => ({ t, steer: true })), ...queue.followUp.map((t) => ({ t, steer: false }))];
 
@@ -79,6 +87,7 @@ export function Composer({ state, selected, onClearSelection, chatVisible, onOpe
     if (!value) return;
     client.send({ type: "chat", text: value, mode, contextNodeIds: selected });
     setText("");
+    setHint(undefined);
     onClearSelection();
     ta.current?.focus();
   };
@@ -135,7 +144,10 @@ export function Composer({ state, selected, onClearSelection, chatVisible, onOpe
           ref={ta}
           rows={1}
           value={text}
-          placeholder={busy ? "AI 正在回答…继续输入会排队（⌘↵ 插话，Esc 打断）" : "想到什么说什么… (↵ 发送，⇧↵ 换行)"}
+          placeholder={
+            hint ?? (busy ? "AI 正在回答…继续输入会排队（⌘↵ 插话，Esc 打断）" : "想到什么说什么… (↵ 发送，⇧↵ 换行)")
+          }
+          onBlur={() => !text && setHint(undefined)}
           onChange={(e) => {
             setText(e.target.value);
             e.target.style.height = "auto";

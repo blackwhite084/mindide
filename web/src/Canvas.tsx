@@ -4,19 +4,27 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
+  MarkerType,
   ReactFlow,
   applyNodeChanges,
   useReactFlow,
   type Edge,
   type NodeChange,
 } from "@xyflow/react";
+import type { BoardEdge, BoardNode } from "../../server/types.ts";
 import { animator } from "./animator.ts";
 import { client, type ClientState } from "./client.ts";
 import { layoutTree, type Size } from "./layout.ts";
 import { MdNode, type MdFlowNode } from "./MdNode.tsx";
-import { ui } from "./ui.ts";
+import { RelationEdge } from "./RelationEdge.tsx";
+import { RelationForm } from "./RelationForm.tsx";
+import { ui, type MenuItem } from "./ui.ts";
 
 const nodeTypes = { md: MdNode };
+const edgeTypes = { relation: RelationEdge };
+const REL_COLOR = "#8b93a3";
+const arrow = { type: MarkerType.ArrowClosed, width: 16, height: 16, color: REL_COLOR };
+const titleOf = (n?: BoardNode) => n?.title || n?.summary.slice(0, 12) || "未命名";
 export const BRANCH_COLORS = ["#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#7dcfff", "#f7768e", "#73daca", "#ff9e64"];
 const ROOT_COLOR = "#c0caf5";
 
@@ -53,7 +61,8 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     }
     return ids;
   }, [state.chat, state.busy, state.tasks]);
-  const layout = useMemo(() => layoutTree(nodes, sizes), [nodes, sizes]);
+  const edgeList = useMemo(() => [...state.edges.values()], [state.edges]);
+  const layout = useMemo(() => layoutTree(nodes, sizes, edgeList), [nodes, sizes, edgeList]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
 
@@ -138,11 +147,96 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       });
     }
     const shown = new Set(layout.visible);
-    const links = [...state.edges.values()]
+    const links: Edge[] = edgeList
       .filter((e) => shown.has(e.source) && shown.has(e.target))
-      .map((e) => ({ id: e.id, source: e.source, target: e.target, className: "link-edge" }));
+      .map((e) => ({
+        id: e.id,
+        type: "relation",
+        source: e.source,
+        target: e.target,
+        className: "rel-edge",
+        markerEnd: arrow,
+        markerStart: arrow,
+        data: {
+          edge: e,
+          sourceTitle: titleOf(state.nodes.get(e.source)),
+          targetTitle: titleOf(state.nodes.get(e.target)),
+          lane: layout.lanes.get(e.id) ?? 0,
+        },
+      }));
     return [...tree, ...links];
-  }, [layout, state.edges]);
+  }, [layout, edgeList, state.nodes]);
+
+  const nodeMenu = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    const n = client.state.nodes.get(id);
+    if (!n) return;
+    const selected = rf.getNodes().filter((x) => x.selected).map((x) => x.id);
+    const multi = selected.length > 1 && selected.includes(id);
+    const items: MenuItem[] = multi
+      ? [
+          { title: `已选中 ${selected.length} 个节点` },
+          { label: "让 AI 处理这些节点…", hint: "推荐", onClick: () => ui.focusComposer(`想让 AI 怎么处理这 ${selected.length} 个节点？`) },
+          { sep: true },
+          { label: `删除 ${selected.length} 个节点`, danger: true, onClick: () => selected.forEach((sid) => client.send({ type: "node:delete", id: sid })) },
+        ]
+      : [
+          { title: titleOf(n) },
+          { label: "让 AI 改这个节点…", hint: "推荐", onClick: () => ui.askAI(id, titleOf(n)) },
+          { sep: true },
+          ...(n.md.trim() && detail === "summary"
+            ? [{ label: n.open ? "收起正文" : "展开正文", hint: "双击", onClick: () => client.patchNode(id, { open: !n.open }) }]
+            : []),
+          ...((layout.childCount.get(id) ?? 0) > 0
+            ? [{ label: n.fold ? "展开分支" : "折叠分支", onClick: () => client.patchNode(id, { fold: !n.fold }) }]
+            : []),
+          { label: "手动编辑", onClick: () => ui.requestEdit(id) },
+          { label: "添加子节点", hint: "Tab", onClick: () => client.createNode(id) },
+          { label: "添加同级节点", hint: "⇧Tab", onClick: () => client.createNode(n.parentId) },
+          ...(n.pinned ? [{ label: "恢复自动排版", onClick: () => client.patchNode(id, { pinned: false }) }] : []),
+          ...(n.parentId ? [{ label: "变成独立主题", onClick: () => client.patchNode(id, { parentId: null }) }] : []),
+          { sep: true },
+          { label: "删除", danger: true, hint: "⌫", onClick: () => client.send({ type: "node:delete", id }) },
+        ];
+    ui.openMenu({ x: e.clientX, y: e.clientY, items });
+  };
+
+  const edgeMenu = (e: React.MouseEvent, edge: BoardEdge) => {
+    e.preventDefault();
+    const s = titleOf(state.nodes.get(edge.source));
+    const t = titleOf(state.nodes.get(edge.target));
+    const set = (patch: Partial<BoardEdge>) => client.send({ type: "edge:update", id: edge.id, patch });
+    const x = e.clientX;
+    const y = e.clientY;
+    ui.openMenu({
+      x,
+      y,
+      items: [
+        { title: `${s} ${edge.dir === "both" ? "↔" : edge.dir === "none" ? "—" : "→"} ${t}` },
+        { label: "编辑关系文字…", onClick: () => ui.openMenu({ x, y, items: [], form: <RelationForm edge={edge} sourceTitle={s} targetTitle={t} /> }) },
+        { sep: true },
+        ...(edge.dir !== "forward" ? [{ label: "改为单向 →", onClick: () => set({ dir: "forward" }) }] : []),
+        ...(edge.dir !== "both" ? [{ label: "改为双向 ↔", onClick: () => set({ dir: "both" }) }] : []),
+        ...(edge.dir !== "none" ? [{ label: "去掉箭头", onClick: () => set({ dir: "none" }) }] : []),
+        ...(edge.dir === "forward" ? [{ label: "反转方向", onClick: () => client.send({ type: "edge:reverse", id: edge.id }) }] : []),
+        { sep: true },
+        { label: "删除关系", danger: true, onClick: () => client.send({ type: "edge:delete", id: edge.id }) },
+      ],
+    });
+  };
+
+  const paneMenu = (e: React.MouseEvent | MouseEvent) => {
+    e.preventDefault();
+    const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    ui.openMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: "在这里新建主题", onClick: () => client.createNode(null, { x: Math.round(p.x), y: Math.round(p.y) }) },
+        { label: "全览", onClick: () => rf.fitView({ duration: 400, maxZoom: 1 }) },
+      ],
+    });
+  };
 
   const onNodesChange = useCallback(
     (changes: NodeChange<MdFlowNode>[]) => {
@@ -204,7 +298,31 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       nodes={rfNodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
+      onNodeContextMenu={(e, n) => nodeMenu(e, n.id)}
+      onEdgeContextMenu={(e, edge) => {
+        const be = state.edges.get(edge.id);
+        if (be) edgeMenu(e, be);
+        else e.preventDefault();
+      }}
+      onPaneContextMenu={paneMenu}
+      onEdgeDoubleClick={(e, edge) => {
+        const be = state.edges.get(edge.id);
+        if (!be) return;
+        ui.openMenu({
+          x: e.clientX,
+          y: e.clientY,
+          items: [],
+          form: (
+            <RelationForm
+              edge={be}
+              sourceTitle={titleOf(state.nodes.get(be.source))}
+              targetTitle={titleOf(state.nodes.get(be.target))}
+            />
+          ),
+        });
+      }}
       onNodeDrag={(_e, node) => setDropTarget(findDropTarget(node.id))}
       onNodeDragStop={(_e, node) => {
         const target = findDropTarget(node.id);
@@ -215,11 +333,6 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       onNodesDelete={(ns) => ns.forEach((n) => client.send({ type: "node:delete", id: n.id }))}
       onEdgesDelete={(es) => es.filter((e) => !e.id.startsWith("t-")).forEach((e) => client.send({ type: "edge:delete", id: e.id }))}
       onConnect={(c) => c.source && c.target && client.send({ type: "edge:add", source: c.source, target: c.target })}
-      onDoubleClick={(e) => {
-        if (!(e.target as HTMLElement).classList.contains("react-flow__pane")) return;
-        const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-        client.createNode(null, { x: Math.round(p.x), y: Math.round(p.y) });
-      }}
       zoomOnDoubleClick={false}
       deleteKeyCode={["Backspace", "Delete"]}
       multiSelectionKeyCode={["Meta", "Shift"]}

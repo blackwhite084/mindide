@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
-import type { Board, BoardEdge, BoardNode, ChatEntry, EditField, ServerMsg, Task } from "./types.ts";
+import type { Board, BoardEdge, BoardNode, ChatEntry, EdgePatch, EditField, ServerMsg, Task } from "./types.ts";
 
 type Listener = (msg: ServerMsg) => void;
 
@@ -124,14 +124,41 @@ export class BoardStore {
     this.emit({ type: "node:delete", id });
   }
 
-  addEdge(source: string, target: string): BoardEdge | undefined {
+  findEdge(a: string, b: string) {
+    return this.board.edges.find((e) => (e.source === a && e.target === b) || (e.source === b && e.target === a));
+  }
+
+  addEdge(source: string, target: string, patch: EdgePatch = {}): BoardEdge | undefined {
     if (source === target || !this.get(source) || !this.get(target)) return;
-    const exists = this.board.edges.find(
-      (e) => (e.source === source && e.target === target) || (e.source === target && e.target === source),
-    );
-    if (exists) return exists;
-    const edge = { id: nanoid(8), source, target };
+    const exists = this.findEdge(source, target);
+    if (exists) {
+      // 已有关系：按新的方向理解，更新文字和箭头
+      if (exists.source !== source) {
+        [exists.source, exists.target] = [exists.target, exists.source];
+        [exists.label, exists.reverseLabel] = [exists.reverseLabel, exists.label];
+      }
+      return this.updateEdge(exists.id, patch);
+    }
+    const edge: BoardEdge = { id: nanoid(8), source, target, dir: "forward", ...stripUndefined(patch) };
     this.board.edges.push(edge);
+    this.emit({ type: "edge:add", edge });
+    return edge;
+  }
+
+  reverseEdge(id: string) {
+    const edge = this.board.edges.find((e) => e.id === id);
+    if (!edge) return;
+    [edge.source, edge.target] = [edge.target, edge.source];
+    if (edge.dir === "both") [edge.label, edge.reverseLabel] = [edge.reverseLabel, edge.label];
+    this.emit({ type: "edge:add", edge });
+  }
+
+  updateEdge(id: string, patch: EdgePatch) {
+    const edge = this.board.edges.find((e) => e.id === id);
+    if (!edge) return;
+    Object.assign(edge, stripUndefined(patch));
+    if (edge.dir !== "both" || !edge.reverseLabel) delete edge.reverseLabel;
+    if (!edge.label) delete edge.label;
     this.emit({ type: "edge:add", edge });
     return edge;
   }
@@ -192,11 +219,19 @@ export class BoardStore {
     };
     walk(null, 0);
     if (this.board.edges.length) {
-      lines.push("", "关联：");
-      for (const e of this.board.edges) lines.push(`- ${e.source} ↔ ${e.target}`);
+      lines.push("", "关系：");
+      for (const e of this.board.edges) {
+        const arrow = e.dir === "both" ? "↔" : e.dir === "none" ? "—" : "→";
+        const text = [e.label, e.reverseLabel].filter(Boolean).join(" / ");
+        lines.push(`- ${e.source} ${arrow} ${e.target}${text ? `：${text}` : ""}`);
+      }
     }
     return lines.join("\n");
   }
+}
+
+function stripUndefined<T extends object>(o: T): T {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
 
 function normalizeBoard(board: Partial<Board>): Board {
@@ -211,7 +246,8 @@ function normalizeBoard(board: Partial<Board>): Board {
     x: n.x ?? 0,
     y: n.y ?? 0,
   }));
-  return { nodes, edges: board.edges ?? [], chat: board.chat ?? [] };
+  const edges = (board.edges ?? []).map((e: any) => ({ dir: "forward", ...e }));
+  return { nodes, edges, chat: board.chat ?? [] };
 }
 
 export function firstLine(md: string, max = 40) {

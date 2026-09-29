@@ -142,16 +142,39 @@ export function createCanvasTools(ctx: ToolContext) {
 
   const link = defineTool({
     name: "canvas_link",
-    label: "关联",
-    description: "在不同分支的两个节点之间画一条关联线（树的父子关系不需要这个）",
-    parameters: Type.Object({ source: Type.String(), target: Type.String() }),
-    execute: async (_id, { source, target }) => {
-      ctx.store.addEdge(must(ctx, source).id, must(ctx, target).id);
-      return result("已关联", must(ctx, target).id);
+    label: "关系",
+    description:
+      "在两个节点之间建立（或更新）一条带箭头的关系线，并写上关系文字，例如「导致」「依赖」「对比」。父子关系不需要这个。双向关系可以给两个方向写不同的文字。",
+    parameters: Type.Object({
+      source: Type.String(),
+      target: Type.String(),
+      label: Type.Optional(Type.String({ description: "source → target 方向的关系，≤ 8 字" })),
+      bidirectional: Type.Optional(Type.Boolean({ description: "是否双向" })),
+      reverseLabel: Type.Optional(Type.String({ description: "双向时 target → source 方向的关系，≤ 8 字" })),
+    }),
+    execute: async (_id, { source, target, label, bidirectional, reverseLabel }) => {
+      const s = must(ctx, source).id;
+      const t = must(ctx, target).id;
+      const dir = bidirectional || reverseLabel ? "both" : "forward";
+      ctx.store.addEdge(s, t, { dir, label, reverseLabel });
+      return result("已建立关系", t);
     },
   });
 
-  const tools = [list, read, create, edit, move, del, link];
+  const unlink = defineTool({
+    name: "canvas_unlink",
+    label: "删除关系",
+    description: "删除两个节点之间的关系线",
+    parameters: Type.Object({ source: Type.String(), target: Type.String() }),
+    execute: async (_id, { source, target }) => {
+      const e = ctx.store.findEdge(must(ctx, source).id, must(ctx, target).id);
+      if (!e) throw new Error("两者之间没有关系线");
+      ctx.store.deleteEdge(e.id);
+      return result("已删除关系");
+    },
+  });
+
+  const tools = [list, read, create, edit, move, del, link, unlink];
 
   if (ctx.dispatch) {
     const dispatch = ctx.dispatch;

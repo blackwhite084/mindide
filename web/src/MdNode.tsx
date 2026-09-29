@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import type { BoardNode } from "../../server/types.ts";
 import { animator, computeSegs, type Frame, type Seg } from "./animator.ts";
 import { client, summaryOf } from "./client.ts";
+import { ui } from "./ui.ts";
 
 export type MdFlowNode = Node<
   {
@@ -103,13 +104,24 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
     requestAnimationFrame(() => (focus === "title" ? titleRef.current : taRef.current)?.focus());
   };
 
-  // 新建的空节点直接进入编辑
+  // 新建的空节点直接进入编辑；右键菜单“手动编辑”也走这里
+  const startEditRef = useRef(startEdit);
+  startEditRef.current = startEdit;
   useEffect(() => {
     if (client.editRequest === node.id) {
       client.editRequest = undefined;
-      startEdit("title");
+      startEditRef.current("title");
     }
-  }, []);
+    return ui.onEditRequest((id) => {
+      if (id === node.id) startEditRef.current("md");
+    });
+  }, [node.id]);
+
+  // 双击：展开/收起正文（编辑在右键菜单里，修改优先交给 AI）
+  const toggleOpen = () => {
+    if (editing || node.draft) return;
+    if (detail === "summary" && node.md.trim()) client.patchNode(node.id, { open: !node.open });
+  };
 
   useLayoutEffect(() => {
     const ta = taRef.current;
@@ -171,7 +183,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
   } else if (summary) {
     body = <div className="summary">{summary}</div>;
   } else {
-    body = <div className="placeholder">双击编辑</div>;
+    body = <div className="placeholder">右键 → 手动编辑，或让 AI 来写</div>;
   }
 
   const floating =
@@ -246,7 +258,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         </div>
       ) : (
         <>
-          <div className="mdnode-head" onDoubleClick={() => startEdit("title")}>
+          <div className="mdnode-head" onDoubleClick={toggleOpen}>
             {node.kind === "task" && <span className="kind">报告</span>}
             {node.draft && <span className="kind drafting">AI 正在写</span>}
             {pending && !frame && !node.draft && <span className="kind drafting">AI 准备修改</span>}
@@ -282,7 +294,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
           <div
             ref={bodyRef}
             className={`mdnode-body ${open ? "nowheel" : ""}`}
-            onDoubleClick={() => startEdit("md")}
+            onDoubleClick={toggleOpen}
           >
             {body}
           </div>

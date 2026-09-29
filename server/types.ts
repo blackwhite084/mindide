@@ -47,12 +47,20 @@ export interface BoardNode {
   updatedAt: number;
 }
 
-/** 跨分支的关联线（树的父子关系不在这里） */
+/** 节点之间的关系线（树的父子关系不在这里） */
 export interface BoardEdge {
   id: string;
   source: string;
   target: string;
+  /** forward：source → target；both：双向；none：无箭头 */
+  dir: "forward" | "both" | "none";
+  /** source → target 方向的关系文字 */
+  label?: string;
+  /** target → source 方向的关系文字（仅双向时） */
+  reverseLabel?: string;
 }
+
+export type EdgePatch = Partial<Pick<BoardEdge, "dir" | "label" | "reverseLabel">>;
 
 export interface ChatEntry {
   id: string;
@@ -130,6 +138,8 @@ export type ClientMsg =
   | { type: "node:delete"; id: string }
   | { type: "node:revert"; id: string }
   | { type: "edge:add"; source: string; target: string }
+  | { type: "edge:update"; id: string; patch: EdgePatch }
+  | { type: "edge:reverse"; id: string }
   | { type: "edge:delete"; id: string }
   | { type: "task:create"; kind: TaskKind; instructions: string; contextNodeIds: string[] }
   | { type: "task:steer"; id: string; text: string }

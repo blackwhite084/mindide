@@ -344,3 +344,38 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .mdnode-head .kind.drafting { color: var(--edit); background: rgba(224, 175, 104, 0.12); animation: pulse 1.4s ease-in-out infinite; }
 .draft-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
 @keyframes pending-glow { 50% { box-shadow: 0 0 0 1.5px rgba(224, 175, 104, 0.12); } }
+
+/* ---------- 关系线 ---------- */
+.react-flow__edge.rel-edge .react-flow__edge-path { stroke: #8b93a3; stroke-width: 1.4; opacity: 0.75; }
+.react-flow__edge.rel-edge:hover .react-flow__edge-path { opacity: 1; stroke-width: 1.8; }
+.react-flow__edge.rel-edge.selected .react-flow__edge-path { stroke: var(--accent); opacity: 1; }
+.rel-label {
+  position: absolute; pointer-events: all; cursor: default;
+  font-size: 11px; line-height: 1.5; padding: 0 7px; border-radius: 9px; white-space: nowrap;
+  background: var(--bg); border: 1px solid #3a414c; color: #b4bac3;
+}
+.rel-label.selected { border-color: var(--accent); color: var(--text); }
+
+/* ---------- 右键菜单 ---------- */
+.ctx-menu {
+  position: fixed; z-index: 100; min-width: 190px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 9px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5); animation: float-in 0.12s ease-out;
+}
+.ctx-item {
+  display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 16px;
+  background: transparent; border: none; border-radius: 6px; padding: 5px 10px; font-size: 13px; text-align: left;
+}
+.ctx-item:hover { background: var(--node-2); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-hint { font-size: 11px; color: var(--muted); }
+.ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+.ctx-title { font-size: 11.5px; color: var(--muted); padding: 4px 10px 2px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.rel-form { display: flex; flex-direction: column; gap: 8px; padding: 8px; width: 260px; }
+.rel-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.rel-form .rel-dir { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-form input:not([type]) { background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 5px 8px; outline: none; font-size: 13px; }
+.rel-form input:focus { border-color: var(--accent); }
+.rel-form .rel-both { flex-direction: row; align-items: center; gap: 6px; color: var(--muted); }
+.rel-actions { display: flex; justify-content: flex-end; gap: 6px; }

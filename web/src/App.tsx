@@ -4,6 +4,7 @@ import { Canvas } from "./Canvas.tsx";
 import { ChatPanel } from "./ChatPanel.tsx";
 import { client } from "./client.ts";
 import { Composer } from "./Composer.tsx";
+import { ContextMenu } from "./ContextMenu.tsx";
 import { TaskPanel } from "./TaskPanel.tsx";
 import { VersionPanel } from "./VersionPanel.tsx";
 
@@ -65,7 +66,7 @@ function Shell() {
         <Canvas state={state} follow={follow} detail={detail} onSelectionChange={onSelectionChange} />
         {state.nodes.size === 0 && (
           <div className="hint">
-            在下方输入想法开始 · 双击空白处新建主题 · 选中节点后按 Tab 加子节点 · 拖到别的节点上可调整层级
+            在下方输入想法开始 · 双击节点展开 · 右键更多操作 · 拖到别的节点上可调整层级
           </div>
         )}
         <Composer
@@ -86,6 +87,7 @@ function Shell() {
           ))}
         </div>
       </main>
+      <ContextMenu />
       {panel && (
         <aside className="panel">
           <div className="panel-tabs">

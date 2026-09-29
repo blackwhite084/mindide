@@ -62,7 +62,7 @@ app.get("/ws", { websocket: true }, (socket) => {
   });
 });
 
-const MANUAL = new Set(["node:update", "node:create", "node:delete", "node:revert", "edge:add", "edge:delete"]);
+const MANUAL = new Set(["node:update", "node:create", "node:delete", "node:revert", "edge:add", "edge:update", "edge:reverse", "edge:delete"]);
 
 async function handle(msg: ClientMsg) {
   const layoutOnly = msg.type === "node:update" && Object.keys(msg.patch).every((k) => ["x", "y", "pinned", "open", "fold"].includes(k));
@@ -102,6 +102,12 @@ async function handle(msg: ClientMsg) {
       break;
     case "edge:delete":
       store.deleteEdge(msg.id);
+      break;
+    case "edge:update":
+      store.updateEdge(msg.id, msg.patch);
+      break;
+    case "edge:reverse":
+      store.reverseEdge(msg.id);
       break;
     case "task:create":
       tasks.run(msg.kind, "", msg.instructions, msg.contextNodeIds);

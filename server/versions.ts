@@ -93,7 +93,7 @@ function sameBoard(a: Board, b: Board) {
   const key = (x: Board) =>
     JSON.stringify({
       n: x.nodes.map((n) => [n.id, n.title, n.summary, n.md, n.parentId]),
-      e: x.edges.map((e) => [e.source, e.target]),
+      e: x.edges.map((e) => [e.source, e.target, e.dir, e.label, e.reverseLabel]),
     });
   return key(a) === key(b);
 }
