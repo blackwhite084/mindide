@@ -62,6 +62,17 @@ export class Workspace {
     return this.store.board.nodes.filter((n) => !n.draft).length;
   }
 
+  /** 服务退出前：把最新的白板和 AI 对话上下文存进版本，重启后 AI 不会“失忆” */
+  shutdown() {
+    clearTimeout(this.manualTimer);
+    try {
+      this.versions.commit("自动保存（退出前）", this.main.messages);
+    } finally {
+      this.store.flush();
+      this.versions.flush();
+    }
+  }
+
   dispose() {
     clearTimeout(this.manualTimer);
     this.main.dispose();

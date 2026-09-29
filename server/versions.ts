@@ -89,10 +89,15 @@ export class VersionTree {
   private persist() {
     if (this.closed) return;
     clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
-      mkdirSync(dirname(this.file), { recursive: true });
-      writeFileSync(this.file, JSON.stringify({ head: this.head, versions: this.versions }));
-    }, 500);
+    this.saveTimer = setTimeout(() => this.flush(), 500);
+  }
+
+  /** 立即写盘（退出前调用） */
+  flush() {
+    if (this.closed) return;
+    clearTimeout(this.saveTimer);
+    mkdirSync(dirname(this.file), { recursive: true });
+    writeFileSync(this.file, JSON.stringify({ head: this.head, versions: this.versions }));
   }
 }
 

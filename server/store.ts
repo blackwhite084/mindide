@@ -45,10 +45,15 @@ export class BoardStore {
   private scheduleSave() {
     if (this.closed) return;
     clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
-      mkdirSync(dirname(this.file), { recursive: true });
-      writeFileSync(this.file, JSON.stringify({ board: this.board, tasks: [...this.tasks.values()] }, null, 2));
-    }, 300);
+    this.saveTimer = setTimeout(() => this.flush(), 300);
+  }
+
+  /** 立即写盘（退出前调用） */
+  flush() {
+    if (this.closed) return;
+    clearTimeout(this.saveTimer);
+    mkdirSync(dirname(this.file), { recursive: true });
+    writeFileSync(this.file, JSON.stringify({ board: this.board, tasks: [...this.tasks.values()] }, null, 2));
   }
 
   get(id: string) {

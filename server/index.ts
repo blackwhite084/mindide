@@ -173,5 +173,22 @@ async function handle(msg: ClientMsg, ws: Workspace, attach: (id: string) => Pro
   }
 }
 
+// 退出（包括开发模式下的自动重启）前把内存里的状态落盘
+let exiting = false;
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    if (exiting) return;
+    exiting = true;
+    for (const ws of boards.workspaces()) {
+      try {
+        ws.shutdown();
+      } catch (err) {
+        console.error(`[shutdown] ${ws.id}`, err);
+      }
+    }
+    process.exit(0);
+  });
+}
+
 await app.listen({ port: PORT, host: process.env.HOST ?? "127.0.0.1" });
 console.log(`[server] http://127.0.0.1:${PORT}`);
