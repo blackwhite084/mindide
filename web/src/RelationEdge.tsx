@@ -3,7 +3,7 @@ import type { BoardEdge } from "../../server/types.ts";
 import { LANE_BASE, LANE_STEP } from "./layout.ts";
 
 export type RelationFlowEdge = Edge<
-  { edge: BoardEdge; sourceTitle: string; targetTitle: string; lane?: number },
+  { edge: BoardEdge; sourceTitle: string; targetTitle: string; lane?: number; state?: string },
   "relation"
 >;
 
@@ -69,11 +69,25 @@ function rectOf(n: ReturnType<typeof useInternalNode>): Rect | undefined {
 }
 
 /** 弧线的文字贴在弧线外侧（左对齐），直线的文字居中压在线上 */
-function Label({ pt, text, title, selected, arc }: { pt: Pt; text: string; title: string; selected?: boolean; arc: boolean }) {
+function Label({
+  pt,
+  text,
+  title,
+  selected,
+  arc,
+  state,
+}: {
+  pt: Pt;
+  text: string;
+  title: string;
+  selected?: boolean;
+  arc: boolean;
+  state?: string;
+}) {
   const tx = arc ? `${pt[0] + 5}px` : `calc(${pt[0]}px - 50%)`;
   return (
     <div
-      className={`rel-label nodrag nopan ${selected ? "selected" : ""}`}
+      className={`rel-label nodrag nopan ${selected ? "selected" : ""} ${state ?? ""}`}
       style={{ transform: `translate(${tx}, calc(${pt[1]}px - 50%))` }}
       title={title}
     >
@@ -114,6 +128,7 @@ export function RelationEdge({ id, source, target, data, selected, markerEnd, ma
             text={edge.label}
             title={`${sourceTitle} → ${targetTitle}：${edge.label}`}
             selected={selected}
+            state={data.state}
           />
         )}
         {hasReverse && (
@@ -123,6 +138,7 @@ export function RelationEdge({ id, source, target, data, selected, markerEnd, ma
             text={edge.reverseLabel!}
             title={`${targetTitle} → ${sourceTitle}：${edge.reverseLabel}`}
             selected={selected}
+            state={data.state}
           />
         )}
       </EdgeLabelRenderer>

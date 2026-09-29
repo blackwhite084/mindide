@@ -1,9 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Activity, ChatEntry } from "../../server/types.ts";
+import type { Activity, BoardNode, ChatEntry } from "../../server/types.ts";
 import type { ClientState } from "./client.ts";
 import { ui } from "./ui.ts";
+
+/** 思考过程：生成中展开显示最后几行，结束后收起 */
+function Thinking({ text, live }: { text: string; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const shown = live || open;
+  return (
+    <div className={`thinking-box ${live ? "live" : ""}`}>
+      <div className="thinking-head" onClick={() => setOpen(!open)}>
+        {live ? "思考中…" : "思考过程"} <span className="muted">{shown ? "▴" : "▾"}</span>
+      </div>
+      {shown && <div className="thinking-text">{live ? text.slice(-400) : text}</div>}
+    </div>
+  );
+}
 
 function ActivityRow({ a }: { a: Activity }) {
   const [open, setOpen] = useState(false);
@@ -27,14 +41,18 @@ function ActivityRow({ a }: { a: Activity }) {
   );
 }
 
-function Entry({ entry, state }: { entry: ChatEntry; state: ClientState }) {
+/**
+ * 单条对话。memo：流式输出时只有最后一条在变，其余条目不重新解析 Markdown。
+ * 只有用户消息需要 nodes（显示引用的节点标题）。
+ */
+const Entry = memo(function Entry({ entry, nodes }: { entry: ChatEntry; nodes?: Map<string, BoardNode> }) {
   if (entry.role === "user") {
     return (
       <div className="chat-user">
         {!!entry.contextNodeIds?.length && (
           <div className="chat-refs">
             {entry.contextNodeIds.map((id) => {
-              const n = state.nodes.get(id);
+              const n = nodes?.get(id);
               return (
                 <span key={id} className="chip" onClick={() => n && ui.focusNode(id)}>
                   {n ? n.title || n.summary.slice(0, 12) : "已删除"}
@@ -49,6 +67,7 @@ function Entry({ entry, state }: { entry: ChatEntry; state: ClientState }) {
   }
   return (
     <div className="chat-ai">
+      {entry.thinking?.trim() && <Thinking text={entry.thinking} live={!!entry.streaming && !entry.text && !entry.activity?.length} />}
       {!!entry.activity?.length && (
         <div className="activity">
           {entry.activity.map((a) => (
@@ -66,7 +85,7 @@ function Entry({ entry, state }: { entry: ChatEntry; state: ClientState }) {
       )}
     </div>
   );
-}
+});
 
 export function ChatPanel({ state }: { state: ClientState }) {
   const box = useRef<HTMLDivElement>(null);
@@ -94,7 +113,7 @@ export function ChatPanel({ state }: { state: ClientState }) {
         </div>
       )}
       {state.chat.map((e) => (
-        <Entry key={e.id} entry={e} state={state} />
+        <Entry key={e.id} entry={e} nodes={e.role === "user" ? state.nodes : undefined} />
       ))}
     </div>
   );

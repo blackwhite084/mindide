@@ -16,6 +16,10 @@ export type MdFlowNode = Node<
     detail: "summary" | "full";
     dropTarget: boolean;
     pending: boolean;
+    /** 有选中项时，与之无关的节点淡化 */
+    dim?: boolean;
+    /** 与选中项直接相连的节点 */
+    related?: boolean;
   },
   "md"
 >;
@@ -73,7 +77,7 @@ function useFollowActive(ref: React.RefObject<HTMLDivElement | null>, frame: Fra
 }
 
 function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
-  const { node, depth, color, childCount, detail, dropTarget, pending } = data;
+  const { node, depth, color, childCount, detail, dropTarget, pending, dim, related } = data;
   const frame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id));
   const mdFrame = frame?.field === "md" ? frame : undefined;
   const sumFrame = frame?.field === "summary" ? frame : undefined;
@@ -222,6 +226,8 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         open && "open",
         dropTarget && "drop-target",
         node.draft && "draft",
+        dim && !frame && "dim",
+        related && "related",
         pending && !frame && "pending",
       ]
         .filter(Boolean)

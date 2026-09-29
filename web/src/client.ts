@@ -1,5 +1,8 @@
 import type {
   Board,
+  BoardMeta,
+  ModelInfo,
+  ThinkingLevel,
   BoardEdge,
   BoardNode,
   ChatEntry,
@@ -23,6 +26,11 @@ export interface ClientState {
   errors: { id: number; message: string }[];
   versions: VersionMeta[];
   head: string | null;
+  boards: BoardMeta[];
+  board: string;
+  models: ModelInfo[];
+  model: string | null;
+  thinking: ThinkingLevel;
 }
 
 type Listener = () => void;
@@ -39,6 +47,11 @@ class Client {
     errors: [],
     versions: [],
     head: null,
+    boards: [],
+    board: "",
+    models: [],
+    model: null,
+    thinking: "low",
   };
   private listeners = new Set<Listener>();
   private ws: WebSocket | undefined;
@@ -82,12 +95,19 @@ class Client {
     const s = this.state;
     switch (msg.type) {
       case "snapshot":
+        animator.reset();
         this.loadBoard(msg.board);
         this.set({ tasks: new Map(msg.tasks.map((t) => [t.id, t])), queue: msg.queue, busy: msg.busy });
         break;
       case "board:replace":
         animator.reset();
         this.loadBoard(msg.board);
+        break;
+      case "boards":
+        this.set({ boards: msg.boards, board: msg.current });
+        break;
+      case "models":
+        this.set({ models: msg.models, model: msg.current, thinking: msg.thinking });
         break;
       case "versions":
         this.set({ versions: msg.versions, head: msg.head });
@@ -131,9 +151,11 @@ class Client {
         this.set({ chat });
         break;
       }
-      case "chat:delta":
-        this.set({ chat: s.chat.map((c) => (c.id === msg.id ? { ...c, text: c.text + msg.delta } : c)) });
+      case "chat:delta": {
+        const field = msg.field ?? "text";
+        this.set({ chat: s.chat.map((c) => (c.id === msg.id ? { ...c, [field]: (c[field] ?? "") + msg.delta } : c)) });
         break;
+      }
       case "queue":
         this.set({ queue: msg.queue });
         break;

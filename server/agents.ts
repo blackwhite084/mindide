@@ -11,7 +11,8 @@ import { nanoid } from "nanoid";
 import { firstLine, type BoardStore } from "./store.ts";
 import { DraftTracker } from "./drafts.ts";
 import { createCanvasTools, type ToolContext } from "./tools.ts";
-import type { Activity, BoardNode, Task, TaskKind } from "./types.ts";
+import { settings } from "./settings.ts";
+import type { Activity, BoardNode, ModelInfo, Task, TaskKind, ThinkingLevel } from "./types.ts";
 import { WEB_TOOLS } from "./web.ts";
 
 const CANVAS_RULES = `白板是一棵（或几棵）思维树，面向内容而不是对话：
@@ -46,7 +47,28 @@ ${CANVAS_RULES}
 };
 
 let runtimePromise: Promise<ModelRuntime> | undefined;
-const getRuntime = () => (runtimePromise ??= ModelRuntime.create());
+export const getRuntime = () => (runtimePromise ??= ModelRuntime.create());
+
+/** 有认证可用的模型；带日期的快照版本在有别名时隐藏 */
+export async function listModels(): Promise<ModelInfo[]> {
+  const models = await (await getRuntime()).getAvailable();
+  const keys = new Set(models.map((m) => `${m.provider}/${m.id}`));
+  return models
+    .filter((m) => {
+      const alias = m.id.replace(/-\d{8}$/, "");
+      return alias === m.id || !keys.has(`${m.provider}/${alias}`);
+    })
+    .map((m) => ({ key: `${m.provider}/${m.id}`, provider: m.provider, name: m.name || m.id, reasoning: !!m.reasoning }));
+}
+
+export async function resolveModel(key: string | undefined) {
+  if (!key) return undefined;
+  const i = key.indexOf("/");
+  return (await getRuntime()).getModel(key.slice(0, i), key.slice(i + 1)) ?? undefined;
+}
+
+const thinkingFor = (model: { reasoning?: boolean } | undefined): ThinkingLevel =>
+  model?.reasoning ? settings.thinking : "off";
 
 async function makeSession(systemPrompt: string, ctx: ToolContext, withWeb: boolean) {
   const loader = new DefaultResourceLoader({
@@ -60,9 +82,11 @@ async function makeSession(systemPrompt: string, ctx: ToolContext, withWeb: bool
   });
   await loader.reload();
   const customTools = [...createCanvasTools(ctx), ...(withWeb ? WEB_TOOLS : [])];
+  const model = await resolveModel(settings.model);
   const { session } = await createAgentSession({
     sessionManager: SessionManager.inMemory(),
     modelRuntime: await getRuntime(),
+    ...(model ? { model, thinkingLevel: thinkingFor(model) } : {}),
     resourceLoader: loader,
     customTools,
     tools: customTools.map((t) => t.name),
@@ -92,7 +116,8 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
       nodeId = args?.ids?.[0];
       break;
     case "canvas_create_node":
-      label = `新建「${args?.title ?? ""}」`;
+      // 流式生成时标题可能还没写出来
+      label = args?.title ? `新建「${args.title}」` : "新建节点…";
       break;
     case "canvas_edit_node":
       label = `修改 ${name(args?.id)}`;
@@ -244,6 +269,24 @@ export class MainAgent {
     return this.session.messages;
   }
 
+  get modelKey(): string | null {
+    const m = this.session.model;
+    return m ? `${m.provider}/${m.id}` : null;
+  }
+
+  /** 切换模型与思考强度（下一次请求生效） */
+  async applyModel() {
+    const model = (await resolveModel(settings.model)) ?? this.session.model;
+    if (!model) return;
+    if (this.modelKey !== `${model.provider}/${model.id}`) await this.session.setModel(model);
+    this.session.setThinkingLevel(thinkingFor(model));
+  }
+
+  dispose() {
+    this.session.abort();
+    this.session.dispose();
+  }
+
   clearQueue() {
     const { steering, followUp } = this.session.clearQueue();
     for (const p of [...steering, ...followUp]) this.pending.delete(p);
@@ -317,6 +360,10 @@ export class MainAgent {
       case "message_update": {
         if (e.assistantMessageEvent.type === "text_delta") {
           this.store.appendChat(this.ensureAi(), e.assistantMessageEvent.delta);
+          break;
+        }
+        if (e.assistantMessageEvent.type === "thinking_delta") {
+          this.store.appendChat(this.ensureAi(), e.assistantMessageEvent.delta, "thinking");
           break;
         }
         // 工具调用还在生成时就给出反馈：草稿节点 + 对话里的进行中操作
@@ -485,6 +532,14 @@ export class TaskRunner {
         this.store.upsertTask(task);
       });
     }
+  }
+
+  dispose() {
+    for (const s of this.sessions.values()) {
+      s.abort();
+      s.dispose();
+    }
+    this.sessions.clear();
   }
 
   abort(id: string) {

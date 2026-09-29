@@ -33,7 +33,17 @@ export class BoardStore {
     if (msg.type !== "queue" && msg.type !== "busy") this.scheduleSave();
   }
 
+  private closed = false;
+
+  /** 白板被删除时停止写盘 */
+  close() {
+    this.closed = true;
+    clearTimeout(this.saveTimer);
+    this.listeners.clear();
+  }
+
   private scheduleSave() {
+    if (this.closed) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       mkdirSync(dirname(this.file), { recursive: true });
@@ -188,11 +198,11 @@ export class BoardStore {
     this.emit({ type: "chat:upsert", entry });
   }
 
-  appendChat(id: string, delta: string) {
+  appendChat(id: string, delta: string, field: "text" | "thinking" = "text") {
     const entry = this.getChat(id);
     if (!entry) return;
-    entry.text += delta;
-    this.emit({ type: "chat:delta", id, delta });
+    entry[field] = (entry[field] ?? "") + delta;
+    this.emit({ type: "chat:delta", id, delta, field });
   }
 
   replaceBoard(board: Board) {

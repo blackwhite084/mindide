@@ -46,21 +46,23 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   followRef.current = follow;
 
   const nodes = useMemo(() => [...state.nodes.values()], [state.nodes]);
-  // AI 正在准备修改的节点（工具参数还在生成中）
-  const pendingIds = useMemo(() => {
-    const ids = new Set<string>();
+  // AI 正在准备修改的节点（工具参数还在生成中）。
+  // 对话每个 token 都会更新，这里先算成字符串再 memo，避免每个 token 都让所有节点重建
+  const pendingKey = (() => {
+    const ids: string[] = [];
     const last = state.chat.at(-1);
     if (state.busy && last?.role === "ai") {
       for (const a of last.activity ?? []) {
-        if (a.status === "running" && a.nodeId && a.tool !== "canvas_read") ids.add(a.nodeId);
+        if (a.status === "running" && a.nodeId && a.tool !== "canvas_read") ids.push(a.nodeId);
       }
     }
     for (const t of state.tasks.values()) {
       if (t.status !== "running") continue;
-      for (const a of t.activity) if (a.status === "running" && a.nodeId && a.tool !== "canvas_read") ids.add(a.nodeId);
+      for (const a of t.activity) if (a.status === "running" && a.nodeId && a.tool !== "canvas_read") ids.push(a.nodeId);
     }
-    return ids;
-  }, [state.chat, state.busy, state.tasks]);
+    return ids.sort().join(",");
+  })();
+  const pendingIds = useMemo(() => new Set(pendingKey ? pendingKey.split(",") : []), [pendingKey]);
   const edgeList = useMemo(() => [...state.edges.values()], [state.edges]);
   const layout = useMemo(() => layoutTree(nodes, sizes, edgeList), [nodes, sizes, edgeList]);
   const layoutRef = useRef(layout);
@@ -103,6 +105,49 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     };
   }, [ensureVisible, onSelectionChange]);
 
+  // 选中高亮：选中节点 → 它的父子、关系线和相连节点；选中关系线 → 两端节点
+  const [selEdges, setSelEdges] = useState<string[]>([]);
+  const selNodesKey = rfNodes
+    .filter((n) => n.selected)
+    .map((n) => n.id)
+    .join(",");
+  const focus = useMemo(() => {
+    const selNodes = selNodesKey ? selNodesKey.split(",") : [];
+    if (!selNodes.length && !selEdges.length) return null;
+    const nodes = new Set<string>();
+    const edges = new Set<string>();
+    for (const id of selNodes) {
+      nodes.add(id);
+      const parent = layout.parent.get(id);
+      if (parent) {
+        nodes.add(parent);
+        edges.add(`t-${id}`);
+      }
+      for (const [child, p] of layout.parent) {
+        if (p === id) {
+          nodes.add(child);
+          edges.add(`t-${child}`);
+        }
+      }
+      for (const e of edgeList) {
+        if (e.source === id || e.target === id) {
+          edges.add(e.id);
+          nodes.add(e.source);
+          nodes.add(e.target);
+        }
+      }
+    }
+    for (const eid of selEdges) {
+      const e = state.edges.get(eid);
+      if (!e) continue;
+      edges.add(e.id);
+      nodes.add(e.source);
+      nodes.add(e.target);
+    }
+    return { nodes, edges, primary: new Set(selNodes) };
+  }, [selNodesKey, selEdges, layout, edgeList, state.edges]);
+  const focusKey = focus ? [...focus.nodes].sort().join(",") : "";
+
   // 状态 + 布局 → React Flow 节点，保留选中、测量、拖动中的状态
   useEffect(() => {
     setRfNodes((prev) => {
@@ -111,19 +156,25 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         const n = state.nodes.get(id)!;
         const p = prevMap.get(id);
         const depth = layout.depth.get(id) ?? 0;
+        const data: MdFlowNode["data"] = {
+          node: n,
+          depth,
+          color: colorOf(layout.branch.get(id) ?? -1),
+          childCount: layout.childCount.get(id) ?? 0,
+          detail,
+          dropTarget: dropTarget === id,
+          pending: pendingIds.has(id),
+          dim: !!focus && !focus.nodes.has(id),
+          related: !!focus && focus.nodes.has(id) && !focus.primary.has(id),
+        };
+        const position = p?.dragging ? p.position : layout.pos.get(id)!;
+        // 内容和位置都没变时复用原对象，让 memo(MdNode) 生效
+        if (p && shallowEqual(p.data, data) && p.position.x === position.x && p.position.y === position.y) return p;
         return {
           id,
           type: "md",
-          position: p?.dragging ? p.position : layout.pos.get(id)!,
-          data: {
-            node: n,
-            depth,
-            color: colorOf(layout.branch.get(id) ?? -1),
-            childCount: layout.childCount.get(id) ?? 0,
-            detail,
-            dropTarget: dropTarget === id,
-            pending: pendingIds.has(id),
-          },
+          position,
+          data,
           selected: p?.selected ?? false,
           dragging: p?.dragging,
           measured: p?.measured,
@@ -131,7 +182,8 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         };
       });
     });
-  }, [state.nodes, layout, detail, dropTarget, pendingIds]);
+    // 用 focusKey 而不是 focus 作依赖：只有高亮的节点集合变了才需要重建
+  }, [state.nodes, layout, detail, dropTarget, pendingIds, focusKey]);
 
   const edges: Edge[] = useMemo(() => {
     const tree: Edge[] = [];
@@ -140,7 +192,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         id: `t-${child}`,
         source: parent,
         target: child,
-        className: "tree-edge",
+        className: `tree-edge ${edgeState(focus, `t-${child}`)}`,
         style: { stroke: colorOf(layout.branch.get(child) ?? -1) },
         selectable: false,
         focusable: false,
@@ -154,7 +206,8 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         type: "relation",
         source: e.source,
         target: e.target,
-        className: "rel-edge",
+        className: `rel-edge ${edgeState(focus, e.id)}`,
+        selected: selEdges.includes(e.id),
         markerEnd: arrow,
         markerStart: arrow,
         data: {
@@ -162,10 +215,11 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           sourceTitle: titleOf(state.nodes.get(e.source)),
           targetTitle: titleOf(state.nodes.get(e.target)),
           lane: layout.lanes.get(e.id) ?? 0,
+          state: edgeState(focus, e.id),
         },
       }));
     return [...tree, ...links];
-  }, [layout, edgeList, state.nodes]);
+  }, [layout, edgeList, state.nodes, focus, selEdges]);
 
   const nodeMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
@@ -300,6 +354,19 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
+      onEdgesChange={(changes) => {
+        const sel = changes.filter((c) => c.type === "select");
+        if (!sel.length) return;
+        setSelEdges((prev) => {
+          const next = new Set(prev);
+          for (const c of sel) {
+            if (c.type !== "select") continue;
+            if (c.selected) next.add(c.id);
+            else next.delete(c.id);
+          }
+          return [...next].filter((id) => !id.startsWith("t-"));
+        });
+      }}
       onNodeContextMenu={(e, n) => nodeMenu(e, n.id)}
       onEdgeContextMenu={(e, edge) => {
         const be = state.edges.get(edge.id);
@@ -354,6 +421,16 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       <Controls showInteractive={false} />
     </ReactFlow>
   );
+}
+
+function edgeState(focus: { edges: Set<string> } | null, id: string) {
+  if (!focus) return "";
+  return focus.edges.has(id) ? "hl" : "dim";
+}
+
+function shallowEqual(a: Record<string, unknown>, b: Record<string, unknown>) {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
 }
 
 function isDescendant(id: string, ancestorId: string) {

@@ -79,7 +79,15 @@ export class VersionTree {
     return { board: structuredClone(v.board), messages: structuredClone(v.messages) };
   }
 
+  private closed = false;
+
+  close() {
+    this.closed = true;
+    clearTimeout(this.saveTimer);
+  }
+
   private persist() {
+    if (this.closed) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       mkdirSync(dirname(this.file), { recursive: true });

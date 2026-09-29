@@ -3,37 +3,30 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { BoardStore } from "./store.ts";
-import { MainAgent, TaskRunner } from "./agents.ts";
-import { VersionTree } from "./versions.ts";
+import { listModels } from "./agents.ts";
+import { BoardManager } from "./boards.ts";
+import { saveSettings, settings } from "./settings.ts";
 import type { ClientMsg, ServerMsg } from "./types.ts";
+import type { Workspace } from "./workspace.ts";
 
 const PORT = Number(process.env.PORT ?? 5174);
-const store = new BoardStore(resolve("data/board.json"));
-const tasks = new TaskRunner(store);
-const main = new MainAgent(store, tasks);
-const versions = new VersionTree(resolve("data/versions.json"), store);
-await main.init();
+const boards = new BoardManager();
+await boards.get(boards.current);
+const models = await listModels();
 
-main.onSettled = (label) => versions.commit(label, main.messages);
-tasks.onFinished = (task) => {
-  if (!main.busy) versions.commit(`任务：${task.title}`, main.messages);
-};
-if (!versions.head) versions.commit("起点", [], true);
-else {
-  // 重启后恢复当前版本的 AI 对话上下文
-  const head = versions.get(versions.head);
-  if (head) main.restore(structuredClone(head.messages));
+type Send = (msg: ServerMsg) => void;
+/** 每个连接各自在看哪块白板 */
+const clients = new Map<Send, () => string>();
+const broadcast = (msg: ServerMsg) => clients.forEach((_, send) => send(msg));
+const boardsMsg = (current: string): ServerMsg => ({ type: "boards", boards: boards.list(), current });
+const broadcastBoards = () => clients.forEach((current, send) => send(boardsMsg(current())));
+
+async function modelsMsg(): Promise<ServerMsg> {
+  const ws = await boards.get(boards.current);
+  return { type: "models", models, current: settings.model ?? ws.main.modelKey, thinking: settings.thinking };
 }
 
-// 手动编辑停下来一会儿后记录一个版本
-let manualTimer: NodeJS.Timeout | undefined;
-function manualEdit() {
-  clearTimeout(manualTimer);
-  manualTimer = setTimeout(() => {
-    if (!main.busy) versions.commit("手动编辑", main.messages);
-  }, 2500);
-}
+boards.onChange = broadcastBoards;
 
 const app = Fastify();
 await app.register(websocket);
@@ -41,105 +34,81 @@ await app.register(websocket);
 const dist = resolve("web/dist");
 if (existsSync(dist)) await app.register(fastifyStatic, { root: dist });
 
-app.get("/ws", { websocket: true }, (socket) => {
-  const send = (msg: ServerMsg) => socket.readyState === 1 && socket.send(JSON.stringify(msg));
-  send({
-    type: "snapshot",
-    board: store.board,
-    tasks: [...store.tasks.values()],
-    queue: main.queueState(),
-    busy: main.busy,
+app.get("/ws", { websocket: true }, async (socket) => {
+  const send: Send = (msg) => socket.readyState === 1 && socket.send(JSON.stringify(msg));
+  let ws: Workspace | undefined;
+  let off: (() => void) | undefined;
+
+  /** 把这个连接挂到某块白板上 */
+  const attach = async (id: string) => {
+    off?.();
+    ws = await boards.get(id);
+    off = ws.store.onMessage(send);
+    for (const m of ws.snapshot()) send(m);
+  };
+
+  clients.set(send, () => ws?.id ?? boards.current);
+  socket.on("close", () => {
+    clients.delete(send);
+    off?.();
   });
-  send({ type: "versions", versions: versions.metas(), head: versions.head });
-  const off = store.onMessage(send);
-  socket.on("close", off);
-  socket.on("message", (raw: Buffer) => {
+
+  // 先注册消息处理，避免初始化期间丢消息
+  const ready = (async () => {
+    send(boardsMsg(boards.current));
+    send(await modelsMsg());
+    await attach(boards.current);
+  })();
+
+  socket.on("message", async (raw: Buffer) => {
     try {
-      handle(JSON.parse(String(raw)) as ClientMsg).catch((err) => send({ type: "error", message: String(err?.message ?? err) }));
+      await ready;
+      // 所在白板被别的窗口删掉了：切到当前白板
+      if (ws && !boards.has(ws.id)) await attach(boards.current);
+      const msg = JSON.parse(String(raw)) as ClientMsg;
+      await handle(msg, ws!, attach);
+      if (msg.type.startsWith("boards:")) broadcastBoards();
     } catch (err: any) {
       send({ type: "error", message: err?.message ?? String(err) });
     }
   });
 });
 
-const MANUAL = new Set(["node:update", "node:create", "node:delete", "node:revert", "edge:add", "edge:update", "edge:reverse", "edge:delete"]);
-
-async function handle(msg: ClientMsg) {
-  const layoutOnly = msg.type === "node:update" && Object.keys(msg.patch).every((k) => ["x", "y", "pinned", "open", "fold"].includes(k));
-  if (MANUAL.has(msg.type) && !layoutOnly) manualEdit();
+async function handle(msg: ClientMsg, ws: Workspace, attach: (id: string) => Promise<void>) {
   switch (msg.type) {
-    case "chat":
-      if (msg.text.trim()) main.chat(msg.text.trim(), msg.mode, msg.contextNodeIds);
-      break;
-    case "abort":
-      main.abort();
-      break;
-    case "queue:clear":
-      main.clearQueue();
-      break;
-    case "node:update":
-      store.updateNode(msg.id, msg.patch);
-      break;
-    case "node:create":
-      if (store.get(msg.id)) break;
-      store.createNode({
-        id: msg.id,
-        parentId: msg.parentId,
-        open: true,
-        ...(msg.x !== undefined && msg.y !== undefined ? { x: msg.x, y: msg.y, pinned: true } : {}),
-      });
-      break;
-    case "node:delete":
-      store.deleteNode(msg.id);
-      break;
-    case "node:revert": {
-      const node = store.get(msg.id);
-      if (node?.lastEdit) store.editNode(node.id, node.lastEdit.before, "撤销", node.lastEdit.field ?? "md");
-      break;
+    case "boards:switch":
+      if (!boards.has(msg.id)) return;
+      boards.switchTo(msg.id);
+      await attach(msg.id);
+      return;
+    case "boards:create": {
+      const meta = boards.create(msg.name);
+      boards.switchTo(meta.id);
+      await attach(meta.id);
+      return;
     }
-    case "edge:add":
-      store.addEdge(msg.source, msg.target);
-      break;
-    case "edge:delete":
-      store.deleteEdge(msg.id);
-      break;
-    case "edge:update":
-      store.updateEdge(msg.id, msg.patch);
-      break;
-    case "edge:reverse":
-      store.reverseEdge(msg.id);
-      break;
-    case "task:create":
-      tasks.run(msg.kind, "", msg.instructions, msg.contextNodeIds);
-      break;
-    case "task:steer":
-      tasks.steer(msg.id, msg.text);
-      break;
-    case "task:abort":
-      tasks.abort(msg.id);
-      break;
-    case "board:import": {
-      clearTimeout(manualTimer);
-      await main.stop();
-      versions.commit("导入前", main.messages);
-      store.importNodes(msg.mode, msg.nodes, msg.edges, msg.parentId ?? null);
-      versions.commit(`导入：${msg.name}`, main.messages, true);
-      break;
+    case "boards:rename":
+      boards.rename(msg.id, msg.name);
+      return;
+    case "boards:delete": {
+      const next = await boards.remove(msg.id);
+      // 正在看被删白板的连接会在下一条消息时发现；当前连接直接切走
+      if (ws.id === msg.id) await attach(next);
+      return;
     }
-    case "version:save":
-      versions.commit(msg.label || "手动保存", main.messages, true);
-      break;
-    case "version:checkout": {
-      clearTimeout(manualTimer);
-      await main.stop();
-      // 离开前把当前未记录的改动存下来，避免丢失
-      versions.commit("自动保存", main.messages);
-      const snap = versions.checkout(msg.id);
-      if (!snap) break;
-      store.replaceBoard(snap.board);
-      main.restore(snap.messages);
-      break;
-    }
+    case "model:set":
+      if (!models.some((m) => m.key === msg.key)) return;
+      saveSettings({ model: msg.key });
+      await Promise.all(boards.workspaces().map((w) => w.main.applyModel()));
+      broadcast(await modelsMsg());
+      return;
+    case "thinking:set":
+      saveSettings({ thinking: msg.level });
+      await Promise.all(boards.workspaces().map((w) => w.main.applyModel()));
+      broadcast(await modelsMsg());
+      return;
+    default:
+      await ws.handle(msg);
   }
 }
 

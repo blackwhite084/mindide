@@ -7,6 +7,7 @@ import { Composer } from "./Composer.tsx";
 import { ContextMenu } from "./ContextMenu.tsx";
 import { FileMenu } from "./FileMenu.tsx";
 import { SearchPalette } from "./SearchPalette.tsx";
+import { BoardSwitcher, ModelMenu } from "./TopbarMenus.tsx";
 import { TaskPanel } from "./TaskPanel.tsx";
 import { VersionPanel } from "./VersionPanel.tsx";
 
@@ -36,14 +37,25 @@ function Shell() {
     setSelected([]);
   }, [rf]);
 
+  // 切换白板：清掉选中，镜头看全局
+  useEffect(() => {
+    if (!state.board) return;
+    setSelected([]);
+    const t = setTimeout(() => rf.fitView({ duration: 300, maxZoom: 1 }), 250);
+    return () => clearTimeout(t);
+  }, [state.board, rf]);
+
   return (
     <div className={`app ${panel ? "with-panel" : ""}`}>
       <header className="topbar">
         <div className="brand">
           <span className={`status-dot ${state.connected ? (state.busy ? "busy" : "ok") : "off"}`} />
           AI Minder
+          <span className="brand-sep">/</span>
+          <BoardSwitcher state={state} />
         </div>
         <div className="topbar-actions">
+          <ModelMenu state={state} />
           <div className="seg-toggle small" title="节点默认显示摘要还是全文">
             <button className={detail === "summary" ? "on" : ""} onClick={() => setDetail("summary")}>
               摘要

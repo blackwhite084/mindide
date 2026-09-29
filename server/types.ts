@@ -66,6 +66,8 @@ export interface ChatEntry {
   id: string;
   role: "user" | "ai";
   text: string;
+  /** 推理模型的思考过程 */
+  thinking?: string;
   contextNodeIds?: string[];
   activity?: Activity[];
   streaming?: boolean;
@@ -98,6 +100,24 @@ export interface QueueState {
   followUp: string[];
 }
 
+export interface BoardMeta {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  nodeCount: number;
+}
+
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+
+export interface ModelInfo {
+  /** provider/id */
+  key: string;
+  provider: string;
+  name: string;
+  reasoning: boolean;
+}
+
 export interface VersionMeta {
   id: string;
   parentId: string | null;
@@ -121,7 +141,9 @@ export type ServerMsg =
   | { type: "edge:add"; edge: BoardEdge }
   | { type: "edge:delete"; id: string }
   | { type: "chat:upsert"; entry: ChatEntry }
-  | { type: "chat:delta"; id: string; delta: string }
+  | { type: "chat:delta"; id: string; delta: string; field?: "text" | "thinking" }
+  | { type: "boards"; boards: BoardMeta[]; current: string }
+  | { type: "models"; models: ModelInfo[]; current: string | null; thinking: ThinkingLevel }
   | { type: "queue"; queue: QueueState }
   | { type: "busy"; busy: boolean }
   | { type: "task:upsert"; task: Task }
@@ -154,4 +176,10 @@ export type ClientMsg =
       edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[];
     }
   | { type: "version:checkout"; id: string }
-  | { type: "version:save"; label?: string };
+  | { type: "version:save"; label?: string }
+  | { type: "boards:switch"; id: string }
+  | { type: "boards:create"; name: string }
+  | { type: "boards:rename"; id: string; name: string }
+  | { type: "boards:delete"; id: string }
+  | { type: "model:set"; key: string }
+  | { type: "thinking:set"; level: ThinkingLevel };
