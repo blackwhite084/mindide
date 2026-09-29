@@ -5,6 +5,7 @@ import { ChatPanel } from "./ChatPanel.tsx";
 import { client } from "./client.ts";
 import { Composer } from "./Composer.tsx";
 import { ContextMenu } from "./ContextMenu.tsx";
+import { FileMenu } from "./FileMenu.tsx";
 import { TaskPanel } from "./TaskPanel.tsx";
 import { VersionPanel } from "./VersionPanel.tsx";
 
@@ -57,6 +58,7 @@ function Shell() {
           <button className="ghost" onClick={() => rf.fitView({ duration: 400, maxZoom: 1 })}>
             全览
           </button>
+          <FileMenu selected={selected} />
           <button className="ghost" onClick={() => setPanel(!panel)}>
             {panel ? "隐藏侧栏" : "侧栏"}
           </button>

@@ -182,7 +182,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
     );
   } else if (summary) {
     body = <div className="summary">{summary}</div>;
-  } else {
+  } else if (!node.title) {
     body = <div className="placeholder">右键 → 手动编辑，或让 AI 来写</div>;
   }
 

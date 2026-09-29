@@ -103,6 +103,8 @@ export function RelationEdge({ id, source, target, data, selected, markerEnd, ma
         markerEnd={edge.dir !== "none" ? markerEnd : undefined}
         markerStart={both ? markerStart : undefined}
         interactionWidth={16}
+        // 行内样式：导出图片时才能保留线条颜色
+        style={{ stroke: "#8b93a3", strokeWidth: 1.4 }}
       />
       <EdgeLabelRenderer>
         {edge.label && (

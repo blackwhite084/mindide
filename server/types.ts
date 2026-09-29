@@ -144,5 +144,14 @@ export type ClientMsg =
   | { type: "task:create"; kind: TaskKind; instructions: string; contextNodeIds: string[] }
   | { type: "task:steer"; id: string; text: string }
   | { type: "task:abort"; id: string }
+  | {
+      type: "board:import";
+      /** replace：替换整个白板；merge：合并进来（挂到 parentId 下或作为新主题） */
+      mode: "replace" | "merge";
+      name: string;
+      parentId?: string | null;
+      nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind">[];
+      edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[];
+    }
   | { type: "version:checkout"; id: string }
   | { type: "version:save"; label?: string };

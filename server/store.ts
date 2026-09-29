@@ -200,6 +200,53 @@ export class BoardStore {
     this.emit({ type: "board:replace", board: this.board });
   }
 
+  /** 导入一组节点和关系；merge 时重新分配 id，避免和现有节点冲突 */
+  importNodes(
+    mode: "replace" | "merge",
+    nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind">[],
+    edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[],
+    parentId: string | null = null,
+  ) {
+    const idMap = new Map<string, string>();
+    for (const n of nodes) idMap.set(n.id, mode === "replace" ? n.id : nanoid(8));
+    const now = Date.now();
+    const imported: BoardNode[] = nodes.map((n, i) => ({
+      id: idMap.get(n.id)!,
+      kind: n.kind === "task" ? "task" : "note",
+      title: n.title ?? "",
+      summary: n.summary ?? "",
+      md: n.md ?? "",
+      parentId: n.parentId && idMap.has(n.parentId) ? idMap.get(n.parentId)! : mode === "merge" ? parentId : null,
+      pinned: false,
+      x: 0,
+      y: 0,
+      open: false,
+      fold: false,
+      // 保持原有顺序（布局按创建时间排兄弟节点）
+      createdAt: now + i,
+      updatedAt: now,
+    }));
+    const importedEdges: BoardEdge[] = edges
+      .filter((e) => idMap.has(e.source) && idMap.has(e.target))
+      .map((e) => ({
+        id: nanoid(8),
+        source: idMap.get(e.source)!,
+        target: idMap.get(e.target)!,
+        dir: e.dir ?? "forward",
+        ...stripUndefined({ label: e.label || undefined, reverseLabel: e.reverseLabel || undefined }),
+      }));
+    if (mode === "replace") {
+      this.replaceBoard({ nodes: imported, edges: importedEdges, chat: this.board.chat });
+    } else {
+      this.replaceBoard({
+        nodes: [...this.board.nodes, ...imported],
+        edges: [...this.board.edges, ...importedEdges],
+        chat: this.board.chat,
+      });
+    }
+    return imported.find((n) => !n.parentId || n.parentId === parentId)?.id;
+  }
+
   upsertTask(task: Task) {
     this.tasks.set(task.id, task);
     this.emit({ type: "task:upsert", task });

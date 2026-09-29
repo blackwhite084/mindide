@@ -118,6 +118,14 @@ async function handle(msg: ClientMsg) {
     case "task:abort":
       tasks.abort(msg.id);
       break;
+    case "board:import": {
+      clearTimeout(manualTimer);
+      await main.stop();
+      versions.commit("导入前", main.messages);
+      store.importNodes(msg.mode, msg.nodes, msg.edges, msg.parentId ?? null);
+      versions.commit(`导入：${msg.name}`, main.messages, true);
+      break;
+    }
     case "version:save":
       versions.commit(msg.label || "手动保存", main.messages, true);
       break;
