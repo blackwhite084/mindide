@@ -4,6 +4,7 @@ import { Canvas } from "./Canvas.tsx";
 import { ChatPanel } from "./ChatPanel.tsx";
 import { client } from "./client.ts";
 import { Composer } from "./Composer.tsx";
+import { CompareBanner } from "./CompareBanner.tsx";
 import { ContextMenu } from "./ContextMenu.tsx";
 import { FileMenu } from "./FileMenu.tsx";
 import { SearchPalette } from "./SearchPalette.tsx";
@@ -84,6 +85,7 @@ function Shell() {
       </header>
       <main className="stage">
         <Canvas state={state} follow={follow} detail={detail} onSelectionChange={onSelectionChange} />
+        <CompareBanner state={state} />
         {state.nodes.size === 0 && (
           <div className="empty-board">
             <div className="empty-title">空白板</div>

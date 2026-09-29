@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import type { BoardNode } from "../../server/types.ts";
 import { animator, computeSegs, type Frame, type Seg } from "./animator.ts";
 import { client, summaryOf } from "./client.ts";
+import { fullText } from "./compare.ts";
 import { ui } from "./ui.ts";
 
 export type MdFlowNode = Node<
@@ -20,6 +21,9 @@ export type MdFlowNode = Node<
     dim?: boolean;
     /** 与选中项直接相连的节点 */
     related?: boolean;
+    /** 版本对比：相对历史版本新增 / 有改动 */
+    diff?: "added" | "modified";
+    beforeText?: string;
   },
   "md"
 >;
@@ -77,7 +81,7 @@ function useFollowActive(ref: React.RefObject<HTMLDivElement | null>, frame: Fra
 }
 
 function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
-  const { node, depth, color, childCount, detail, dropTarget, pending, dim, related } = data;
+  const { node, depth, color, childCount, detail, dropTarget, pending, dim, related, diff, beforeText } = data;
   const frame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id));
   const mdFrame = frame?.field === "md" ? frame : undefined;
   const sumFrame = frame?.field === "summary" ? frame : undefined;
@@ -91,6 +95,10 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
   const [draftTitle, setDraftTitle] = useState("");
   const [draftMd, setDraftMd] = useState("");
   const [showDiff, setShowDiff] = useState(false);
+  const [showCompare, setShowCompare] = useState(false);
+  useEffect(() => {
+    if (!diff) setShowCompare(false);
+  }, [diff]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const floatRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -196,6 +204,11 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         <div className="float-by">{mdFrame.by} 正在修改正文…</div>
         <DiffText segs={mdFrame.segs} frame={mdFrame} />
       </div>
+    ) : !editing && showCompare && beforeText !== undefined ? (
+      <div className="float-panel compare nowheel nodrag">
+        <div className="float-by">与对比版本相比的变化</div>
+        <DiffText segs={computeSegs(beforeText, fullText(node))} still />
+      </div>
     ) : !editing && showDiff && node.lastEdit ? (
       <div className="float-panel nowheel nodrag">
         <div className="float-by">
@@ -227,6 +240,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         dropTarget && "drop-target",
         node.draft && "draft",
         dim && !frame && "dim",
+        diff && `diff-${diff}`,
         related && "related",
         pending && !frame && "pending",
       ]
@@ -278,7 +292,17 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
                 ⌖
               </button>
             )}
-            {!frame && node.lastEdit && (
+            {diff === "added" && <span className="kind diff-tag added">新增</span>}
+            {diff === "modified" && (
+              <button
+                className={`kind diff-tag modified nodrag ${showCompare ? "on" : ""}`}
+                title="查看相对对比版本的变化"
+                onClick={() => setShowCompare(!showCompare)}
+              >
+                有改动
+              </button>
+            )}
+            {!frame && !diff && node.lastEdit && (
               <button
                 className={`badge nodrag ${showDiff ? "on" : ""}`}
                 title="查看最近一次修改"

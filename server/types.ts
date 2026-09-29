@@ -162,6 +162,7 @@ export type ServerMsg =
   | { type: "chat:delta"; id: string; delta: string; field?: "text" | "thinking" }
   | { type: "boards"; boards: BoardMeta[]; current: string }
   | { type: "sources"; sources: Source[] }
+  | { type: "version:board"; id: string; board: Board }
   | { type: "models"; models: ModelInfo[]; current: string | null; thinking: ThinkingLevel }
   | { type: "queue"; queue: QueueState }
   | { type: "busy"; busy: boolean }
@@ -196,6 +197,10 @@ export type ClientMsg =
     }
   | { type: "version:checkout"; id: string }
   | { type: "version:save"; label?: string }
+  /** 取某个版本的白板快照（用于对比），只回给请求方 */
+  | { type: "version:get"; id: string }
+  /** 把对比中发现被删除的节点恢复回来 */
+  | { type: "node:restore"; node: BoardNode }
   | { type: "boards:switch"; id: string }
   | { type: "boards:create"; name: string }
   | { type: "boards:rename"; id: string; name: string }

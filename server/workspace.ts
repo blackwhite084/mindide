@@ -5,7 +5,7 @@ import { BoardStore } from "./store.ts";
 import type { ClientMsg, ServerMsg } from "./types.ts";
 import { VersionTree } from "./versions.ts";
 
-const MANUAL = new Set(["node:update", "node:create", "node:delete", "node:revert", "edge:add", "edge:update", "edge:reverse", "edge:delete"]);
+const MANUAL = new Set(["node:update", "node:create", "node:delete", "node:revert", "edge:add", "edge:update", "edge:reverse", "edge:delete", "node:restore"]);
 const LAYOUT_ONLY = ["x", "y", "pinned", "open", "fold"];
 
 /** 一块白板：内容、版本树、主对话 agent 和后台任务，彼此独立 */
@@ -147,6 +147,21 @@ export class Workspace {
       case "sources:remove":
         this.sources.remove(msg.id);
         break;
+      case "node:restore": {
+        const n = msg.node;
+        if (store.get(n.id)) break;
+        store.createNode(
+          {
+            ...n,
+            parentId: n.parentId && store.get(n.parentId) ? n.parentId : null,
+            draft: false,
+            lastEdit: undefined,
+            createdAt: n.createdAt,
+          },
+          true,
+        );
+        break;
+      }
       case "version:save":
         versions.commit(msg.label || "手动保存", main.messages, true);
         break;

@@ -33,6 +33,8 @@ export interface ClientState {
   model: string | null;
   thinking: ThinkingLevel;
   sources: Source[];
+  /** 正在对比的历史版本 */
+  compare: { id: string; label: string; board: Board } | null;
 }
 
 type Listener = () => void;
@@ -55,6 +57,7 @@ class Client {
     model: null,
     thinking: "low",
     sources: [],
+    compare: null,
   };
   private listeners = new Set<Listener>();
   private ws: WebSocket | undefined;
@@ -99,13 +102,20 @@ class Client {
     switch (msg.type) {
       case "snapshot":
         animator.reset();
+        this.set({ compare: null });
         this.loadBoard(msg.board);
         this.set({ tasks: new Map(msg.tasks.map((t) => [t.id, t])), queue: msg.queue, busy: msg.busy });
         break;
       case "board:replace":
         animator.reset();
+        this.set({ compare: null });
         this.loadBoard(msg.board);
         break;
+      case "version:board": {
+        const meta = s.versions.find((v) => v.id === msg.id);
+        this.set({ compare: { id: msg.id, label: meta?.label ?? "历史版本", board: msg.board } });
+        break;
+      }
       case "sources":
         this.set({ sources: msg.sources });
         break;
@@ -207,6 +217,14 @@ class Client {
     nodes.set(id, { ...n, ...patch });
     this.set({ nodes });
     this.send({ type: "node:update", id, patch });
+  }
+
+  startCompare(versionId: string) {
+    this.send({ type: "version:get", id: versionId });
+  }
+
+  endCompare() {
+    this.set({ compare: null });
   }
 
   /** 上传参考资料到当前白板 */

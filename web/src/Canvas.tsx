@@ -17,6 +17,7 @@ import { animator } from "./animator.ts";
 import { client, type ClientState } from "./client.ts";
 import { layoutTree, type Size } from "./layout.ts";
 import { MdNode, type MdFlowNode } from "./MdNode.tsx";
+import { diffBoards, fullText } from "./compare.ts";
 import { RelationEdge } from "./RelationEdge.tsx";
 import { RelationForm } from "./RelationForm.tsx";
 import { ui, type MenuItem } from "./ui.ts";
@@ -65,6 +66,11 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   })();
   const pendingIds = useMemo(() => new Set(pendingKey ? pendingKey.split(",") : []), [pendingKey]);
   const edgeList = useMemo(() => [...state.edges.values()], [state.edges]);
+  // 版本对比：当前白板相对历史版本的变化
+  const diff = useMemo(
+    () => (state.compare ? diffBoards(state.compare.board, nodes, edgeList) : null),
+    [state.compare, nodes, edgeList],
+  );
   const layout = useMemo(() => layoutTree(nodes, sizes, edgeList), [nodes, sizes, edgeList]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -167,6 +173,8 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           pending: pendingIds.has(id),
           dim: !!focus && !focus.nodes.has(id),
           related: !!focus && focus.nodes.has(id) && !focus.primary.has(id),
+          diff: diff?.nodes.get(id),
+          beforeText: diff?.nodes.get(id) === "modified" ? fullText(diff.before.get(id)!) : undefined,
         };
         const position = p?.dragging ? p.position : layout.pos.get(id)!;
         // 内容和位置都没变时复用原对象，让 memo(MdNode) 生效
@@ -184,7 +192,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       });
     });
     // 用 focusKey 而不是 focus 作依赖：只有高亮的节点集合变了才需要重建
-  }, [state.nodes, layout, detail, dropTarget, pendingIds, focusKey]);
+  }, [state.nodes, layout, detail, dropTarget, pendingIds, focusKey, diff]);
 
   const edges: Edge[] = useMemo(() => {
     const tree: Edge[] = [];

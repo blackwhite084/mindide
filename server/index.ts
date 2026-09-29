@@ -122,7 +122,7 @@ app.get("/ws", { websocket: true }, async (socket) => {
       // 所在白板被别的窗口删掉了：切到当前白板
       if (ws && !boards.has(ws.id)) await attach(boards.current);
       const msg = JSON.parse(String(raw)) as ClientMsg;
-      await handle(msg, ws!, attach);
+      await handle(msg, ws!, attach, send);
       if (msg.type.startsWith("boards:")) broadcastBoards();
     } catch (err: any) {
       send({ type: "error", message: err?.message ?? String(err) });
@@ -130,8 +130,13 @@ app.get("/ws", { websocket: true }, async (socket) => {
   });
 });
 
-async function handle(msg: ClientMsg, ws: Workspace, attach: (id: string) => Promise<void>) {
+async function handle(msg: ClientMsg, ws: Workspace, attach: (id: string) => Promise<void>, send: Send) {
   switch (msg.type) {
+    case "version:get": {
+      const v = ws.versions.get(msg.id);
+      if (v) send({ type: "version:board", id: v.id, board: v.board });
+      return;
+    }
     case "boards:switch":
       if (!boards.has(msg.id)) return;
       boards.switchTo(msg.id);
