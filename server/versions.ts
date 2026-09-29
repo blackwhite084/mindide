@@ -45,6 +45,7 @@ export class VersionTree {
   /** 白板和上一个版本相比有变化时才记录 */
   commit(label: string, messages: unknown[], force = false) {
     const board = structuredClone(this.store.board);
+    board.nodes = board.nodes.filter((n) => !n.draft);
     const prev = this.head ? this.get(this.head) : undefined;
     if (!force && prev && sameBoard(prev.board, board)) {
       // 白板没变、只有对话变化时，更新当前版本的对话即可

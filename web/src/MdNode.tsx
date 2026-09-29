@@ -14,6 +14,7 @@ export type MdFlowNode = Node<
     childCount: number;
     detail: "summary" | "full";
     dropTarget: boolean;
+    pending: boolean;
   },
   "md"
 >;
@@ -71,7 +72,7 @@ function useFollowActive(ref: React.RefObject<HTMLDivElement | null>, frame: Fra
 }
 
 function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
-  const { node, depth, color, childCount, detail, dropTarget } = data;
+  const { node, depth, color, childCount, detail, dropTarget, pending } = data;
   const frame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id));
   const mdFrame = frame?.field === "md" ? frame : undefined;
   const sumFrame = frame?.field === "summary" ? frame : undefined;
@@ -159,6 +160,14 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
     );
   } else if (summaryView) {
     body = summaryView;
+  } else if (node.draft) {
+    body = (
+      <div className="summary">
+        {summary}
+        <span className="caret" />
+        {node.md && <div className="draft-meta">正文 {node.md.length} 字</div>}
+      </div>
+    );
   } else if (summary) {
     body = <div className="summary">{summary}</div>;
   } else {
@@ -200,6 +209,8 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         frame && `phase-${frame.phase}`,
         open && "open",
         dropTarget && "drop-target",
+        node.draft && "draft",
+        pending && !frame && "pending",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -237,6 +248,8 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         <>
           <div className="mdnode-head" onDoubleClick={() => startEdit("title")}>
             {node.kind === "task" && <span className="kind">报告</span>}
+            {node.draft && <span className="kind drafting">AI 正在写</span>}
+            {pending && !frame && !node.draft && <span className="kind drafting">AI 准备修改</span>}
             <span className="title">{node.title || summary.slice(0, 16) || "未命名"}</span>
             {node.pinned && (
               <button

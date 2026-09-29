@@ -40,6 +40,8 @@ export interface BoardNode {
   open: boolean;
   /** 折叠子树 */
   fold: boolean;
+  /** 模型仍在生成中的草稿节点 */
+  draft?: boolean;
   lastEdit?: LastEdit;
   createdAt: number;
   updatedAt: number;

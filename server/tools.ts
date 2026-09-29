@@ -10,6 +10,8 @@ export interface ToolContext {
   /** 新建节点未指定 parentId 时的默认父节点（通常是用户选中的节点） */
   defaultParent: () => string | null;
   dispatch?: (kind: TaskKind, title: string, instructions: string, contextNodeIds: string[]) => string;
+  /** 领取流式生成时预先放上白板的草稿节点 */
+  claimDraft?: (toolCallId: string) => string | undefined;
 }
 
 const result = (s: string, nodeId?: string) => ({
@@ -59,16 +61,23 @@ export function createCanvasTools(ctx: ToolContext) {
     label: "新建节点",
     description:
       "在思维树上新建一个内容节点。一个节点只讲一个要点；复杂内容拆成父节点 + 若干子节点。",
+    // parentId 放在最前面：模型按顺序生成参数，草稿节点一出现就能挂到正确的位置
     parameters: Type.Object({
-      title: Type.String({ description: "简短标题，≤ 16 字" }),
-      summary: Type.String({ description: "一句话要点摘要，≤ 40 字，折叠时展示" }),
-      md: Type.String({ description: "正文 Markdown，可展开查看；没有更多细节时可以为空" }),
       parentId: Type.Optional(
         Type.String({ description: "父节点 id；传 root 表示新的主题。省略时挂在用户选中的节点下（没选中则为新主题）" }),
       ),
+      title: Type.String({ description: "简短标题，≤ 16 字" }),
+      summary: Type.String({ description: "一句话要点摘要，≤ 40 字，折叠时展示" }),
+      md: Type.String({ description: "正文 Markdown，可展开查看；没有更多细节时可以为空" }),
     }),
-    execute: async (_id, { title, summary, md, parentId }) => {
-      const node = ctx.store.createNode({ title, summary, md, parentId: parentOf(ctx, parentId) }, true);
+    execute: async (toolCallId, { title, summary, md, parentId }) => {
+      const parent = parentOf(ctx, parentId);
+      const draftId = ctx.claimDraft?.(toolCallId);
+      if (draftId) {
+        ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false });
+        return result(`已创建节点 ${draftId}`, draftId);
+      }
+      const node = ctx.store.createNode({ title, summary, md, parentId: parent }, true);
       return result(`已创建节点 ${node.id}`, node.id);
     },
   });

@@ -38,6 +38,21 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   followRef.current = follow;
 
   const nodes = useMemo(() => [...state.nodes.values()], [state.nodes]);
+  // AI 正在准备修改的节点（工具参数还在生成中）
+  const pendingIds = useMemo(() => {
+    const ids = new Set<string>();
+    const last = state.chat.at(-1);
+    if (state.busy && last?.role === "ai") {
+      for (const a of last.activity ?? []) {
+        if (a.status === "running" && a.nodeId && a.tool !== "canvas_read") ids.add(a.nodeId);
+      }
+    }
+    for (const t of state.tasks.values()) {
+      if (t.status !== "running") continue;
+      for (const a of t.activity) if (a.status === "running" && a.nodeId && a.tool !== "canvas_read") ids.add(a.nodeId);
+    }
+    return ids;
+  }, [state.chat, state.busy, state.tasks]);
   const layout = useMemo(() => layoutTree(nodes, sizes), [nodes, sizes]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -98,6 +113,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
             childCount: layout.childCount.get(id) ?? 0,
             detail,
             dropTarget: dropTarget === id,
+            pending: pendingIds.has(id),
           },
           selected: p?.selected ?? false,
           dragging: p?.dragging,
@@ -106,7 +122,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         };
       });
     });
-  }, [state.nodes, layout, detail, dropTarget]);
+  }, [state.nodes, layout, detail, dropTarget, pendingIds]);
 
   const edges: Edge[] = useMemo(() => {
     const tree: Edge[] = [];

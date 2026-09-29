@@ -200,7 +200,7 @@ export class BoardStore {
 }
 
 function normalizeBoard(board: Partial<Board>): Board {
-  const nodes = (board.nodes ?? []).map((n: any) => ({
+  const nodes = (board.nodes ?? []).filter((n: any) => !n.draft).map((n: any) => ({
     kind: "note",
     summary: "",
     parentId: null,

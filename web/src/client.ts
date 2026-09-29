@@ -97,6 +97,8 @@ class Client {
         const isNew = !nodes.has(msg.node.id);
         nodes.set(msg.node.id, msg.node);
         this.set({ nodes });
+        // 草稿节点出现时镜头顺带跟过去（已在视野内则不动）
+        if (isNew && msg.node.draft) animator.focus?.(msg.node.id);
         if (isNew && msg.animate === "create") {
           animator.enqueue(msg.node.id, "summary", "", summaryOf(msg.node), "AI", "create");
         }

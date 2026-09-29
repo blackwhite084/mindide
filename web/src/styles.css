@@ -337,3 +337,10 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .peek .md { flex: 1; font-size: 12.5px; color: #c3c9d2; }
 .peek button { flex: none; padding: 0 6px; }
 .summary .diff-text { padding: 0; font-size: inherit; line-height: inherit; }
+
+/* ---------- 草稿 / 待修改 ---------- */
+.mdnode.draft { border-style: dashed; border-color: rgba(224, 175, 104, 0.55); background: color-mix(in srgb, var(--edit) 5%, var(--node)); }
+.mdnode.pending { box-shadow: 0 0 0 1.5px rgba(224, 175, 104, 0.4); animation: pending-glow 1.4s ease-in-out infinite; }
+.mdnode-head .kind.drafting { color: var(--edit); background: rgba(224, 175, 104, 0.12); animation: pulse 1.4s ease-in-out infinite; }
+.draft-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+@keyframes pending-glow { 50% { box-shadow: 0 0 0 1.5px rgba(224, 175, 104, 0.12); } }
