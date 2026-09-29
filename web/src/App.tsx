@@ -6,6 +6,7 @@ import { client } from "./client.ts";
 import { Composer } from "./Composer.tsx";
 import { ContextMenu } from "./ContextMenu.tsx";
 import { FileMenu } from "./FileMenu.tsx";
+import { SearchPalette } from "./SearchPalette.tsx";
 import { TaskPanel } from "./TaskPanel.tsx";
 import { VersionPanel } from "./VersionPanel.tsx";
 
@@ -58,6 +59,9 @@ function Shell() {
           <button className="ghost" onClick={() => rf.fitView({ duration: 400, maxZoom: 1 })}>
             全览
           </button>
+          <button className="ghost" title="搜索节点" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}>
+            搜索 <span className="kbd">⌘K</span>
+          </button>
           <FileMenu selected={selected} />
           <button className="ghost" onClick={() => setPanel(!panel)}>
             {panel ? "隐藏侧栏" : "侧栏"}
@@ -90,6 +94,7 @@ function Shell() {
         </div>
       </main>
       <ContextMenu />
+      <SearchPalette state={state} />
       {panel && (
         <aside className="panel">
           <div className="panel-tabs">
