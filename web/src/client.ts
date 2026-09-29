@@ -33,6 +33,8 @@ export interface ClientState {
   model: string | null;
   thinking: ThinkingLevel;
   sources: Source[];
+  /** 用过的本地目录（全局记忆） */
+  recentDirs: { path: string; name: string; lastUsed: number }[];
   /** 正在对比的历史版本 */
   compare: { id: string; label: string; board: Board } | null;
 }
@@ -58,6 +60,7 @@ class Client {
     thinking: "low",
     sources: [],
     compare: null,
+    recentDirs: [],
   };
   private listeners = new Set<Listener>();
   private ws: WebSocket | undefined;
@@ -116,6 +119,9 @@ class Client {
         this.set({ compare: { id: msg.id, label: meta?.label ?? "历史版本", board: msg.board } });
         break;
       }
+      case "recentDirs":
+        this.set({ recentDirs: msg.dirs });
+        break;
       case "sources":
         this.set({ sources: msg.sources });
         break;

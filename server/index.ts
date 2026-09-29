@@ -10,7 +10,7 @@ import { WEB_DIST } from "./paths.ts";
 import { isSupported } from "./sources.ts";
 import { listModels } from "./agents.ts";
 import { BoardManager } from "./boards.ts";
-import { saveSettings, settings } from "./settings.ts";
+import { forgetDir, rememberDir, saveSettings, settings } from "./settings.ts";
 import type { ClientMsg, ServerMsg } from "./types.ts";
 import type { Workspace } from "./workspace.ts";
 
@@ -113,6 +113,7 @@ app.get("/ws", { websocket: true }, async (socket) => {
   const ready = (async () => {
     send(boardsMsg(boards.current));
     send(await modelsMsg());
+    send({ type: "recentDirs", dirs: settings.recentDirs });
     await attach(boards.current);
   })();
 
@@ -157,6 +158,16 @@ async function handle(msg: ClientMsg, ws: Workspace, attach: (id: string) => Pro
       if (ws.id === msg.id) await attach(next);
       return;
     }
+    case "sources:addDir": {
+      const src = await ws.sources.addDir(msg.path);
+      rememberDir(src.path, src.name);
+      broadcast({ type: "recentDirs", dirs: settings.recentDirs });
+      return;
+    }
+    case "recentDirs:forget":
+      forgetDir(msg.path);
+      broadcast({ type: "recentDirs", dirs: settings.recentDirs });
+      return;
     case "model:set":
       if (!models.some((m) => m.key === msg.key)) return;
       saveSettings({ model: msg.key });

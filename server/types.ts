@@ -133,6 +133,8 @@ export interface Source {
   error?: string;
   /** 目录是上传的（存在白板目录里），而不是引用的本地目录 */
   uploaded?: boolean;
+  /** 允许 AI 在这个目录里执行 shell 命令（查看用途） */
+  allowBash?: boolean;
   addedAt: number;
 }
 
@@ -163,6 +165,7 @@ export type ServerMsg =
   | { type: "boards"; boards: BoardMeta[]; current: string }
   | { type: "sources"; sources: Source[] }
   | { type: "version:board"; id: string; board: Board }
+  | { type: "recentDirs"; dirs: { path: string; name: string; lastUsed: number }[] }
   | { type: "models"; models: ModelInfo[]; current: string | null; thinking: ThinkingLevel }
   | { type: "queue"; queue: QueueState }
   | { type: "busy"; busy: boolean }
@@ -207,5 +210,7 @@ export type ClientMsg =
   | { type: "boards:delete"; id: string }
   | { type: "sources:addDir"; path: string }
   | { type: "sources:remove"; id: string }
+  | { type: "sources:bash"; id: string; allow: boolean }
+  | { type: "recentDirs:forget"; path: string }
   | { type: "model:set"; key: string }
   | { type: "thinking:set"; level: ThinkingLevel };

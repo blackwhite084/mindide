@@ -152,8 +152,8 @@ export class Workspace {
         versions.commit(`导入：${msg.name}`, main.messages, true);
         break;
       }
-      case "sources:addDir":
-        await this.sources.addDir(msg.path);
+      case "sources:bash":
+        this.sources.setBash(msg.id, msg.allow);
         break;
       case "sources:remove":
         this.sources.remove(msg.id);

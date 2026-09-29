@@ -22,6 +22,26 @@ const TEXT_NAMES = new Set(["Dockerfile", "Makefile", "README", "LICENSE", ".git
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "out", ".next", ".nuxt", "target", "__pycache__", ".venv", "venv", ".idea", ".vscode", "coverage", ".cache"]);
 
 const MAX_FILE_BYTES = 2_000_000;
+const BASH_TIMEOUT_MS = 30_000;
+const BASH_OUTPUT_CHARS = 30_000;
+
+/**
+ * 明显会写入或破坏的命令。只是防止 AI 误操作的护栏，不是安全边界：
+ * 真正做成产品时应在容器 / 沙箱里执行。
+ */
+const BASH_DENY: [RegExp, string][] = [
+  [/(^|[;&|`(]\s*)(sudo|su|doas)\b/, "提权"],
+  [/(^|[;&|`(]\s*)(rm|rmdir|mv|cp|dd|shred|truncate|mkfs|chmod|chown|chgrp|ln|touch|mkdir|tee|install)\b/, "修改文件"],
+  [/(^|[^<>&0-9])>{1,2}\s*(?!&|\/dev\/null)/, "重定向写文件"],
+  [/\bsed\b[^|;&]*\s-i/, "原地修改文件"],
+  [/\bgit\s+(push|commit|reset|checkout|switch|rebase|merge|pull|clean|stash|rm|mv|restore|apply|am|cherry-pick|revert|tag|branch\s+-[dD]|config)\b/, "修改仓库"],
+  [/\b(npm|pnpm|yarn|bun|pip|pip3|poetry|cargo|go|brew|apt|apt-get|gem)\s+(i|install|add|remove|uninstall|update|upgrade|publish|get)\b/, "安装或发布"],
+  [/\b(curl|wget)\b[^|;&]*\s-(o|O|T)\b/, "下载或上传文件"],
+  [/\b(kill|killall|pkill|shutdown|reboot|launchctl|systemctl)\b/, "进程或系统操作"],
+  [/\bfind\b.*\s-(delete|exec|execdir|ok|okdir|fprint\w*)\b/, "find 删除或执行命令"],
+  [/\bxargs\b/, "xargs 批量执行"],
+  [/\b(python3?|node|ruby|perl|php)\b[^|;&]*\s-(c|e)\b/, "执行任意脚本"],
+];
 const READ_LIMIT_LINES = 200;
 const READ_LIMIT_CHARS = 40_000;
 
@@ -123,7 +143,16 @@ export class SourceLibrary {
     const real = realpathSync(abs);
     const exists = this.sources.find((s) => s.kind === "dir" && s.path === real);
     if (exists) return exists;
-    const src: Source = { id: nanoid(8), kind: "dir", name: basename(real), path: real, size: 0, status: "processing", addedAt: Date.now() };
+    const src: Source = {
+      id: nanoid(8),
+      kind: "dir",
+      name: basename(real),
+      path: real,
+      size: 0,
+      status: "processing",
+      allowBash: true,
+      addedAt: Date.now(),
+    };
     this.sources.push(src);
     this.save();
     try {
@@ -161,6 +190,13 @@ export class SourceLibrary {
     Object.assign(src, { status: list.length ? "ready" : "error", files: list.length, error: list.length ? undefined : "文件夹里没有可读的文本文件" });
     this.save();
     return src;
+  }
+
+  setBash(id: string, allow: boolean) {
+    const src = this.sources.find((s) => s.id === id);
+    if (!src || src.kind !== "dir") return;
+    src.allowBash = allow;
+    this.save();
   }
 
   remove(id: string) {
@@ -313,6 +349,28 @@ export class SourceLibrary {
     return results.join("\n") + (results.length >= maxResults ? "\n…(结果较多，请换更具体的关键词)" : "");
   }
 
+  /** 在目录资料里执行查看类命令（git log、wc、ls、cat 等） */
+  async bash(src: Source, command: string): Promise<string> {
+    if (src.kind !== "dir") throw new Error("只有目录类资料可以执行命令");
+    if (!src.allowBash) throw new Error(`用户没有允许在「${src.name}」里执行命令（可在侧栏「资料」里打开）`);
+    for (const [re, why] of BASH_DENY) {
+      if (re.test(command)) throw new Error(`已拦截（${why}）：只允许查看类命令，不能修改文件或环境`);
+    }
+    const started = Date.now();
+    const { stdout, stderr, code } = await run("bash", ["-c", command], {
+      cwd: src.path,
+      timeout: BASH_TIMEOUT_MS,
+      maxBuffer: 8 * 1024 * 1024,
+      env: { ...process.env, GIT_PAGER: "cat", PAGER: "cat", TERM: "dumb", NO_COLOR: "1" },
+    }).then(
+      (r) => ({ ...r, code: 0 }),
+      (e) => ({ stdout: e.stdout ?? "", stderr: e.killed ? `超时（${BASH_TIMEOUT_MS / 1000}s）被终止\n${e.stderr ?? ""}` : e.stderr ?? String(e.message), code: e.code ?? 1 }),
+    );
+    let out = [String(stdout), String(stderr) && `[stderr]\n${stderr}`].filter(Boolean).join("\n").trimEnd();
+    if (out.length > BASH_OUTPUT_CHARS) out = out.slice(0, BASH_OUTPUT_CHARS) + `\n…(输出过长，已截断，共 ${out.length} 字)`;
+    return `$ ${command}\n(目录：${src.name}，退出码 ${code}，${Date.now() - started}ms)\n${out || "(无输出)"}`;
+  }
+
   /** 给模型看的资料清单 */
   outline() {
     const ready = this.sources.filter((s) => s.status === "ready");
@@ -320,7 +378,7 @@ export class SourceLibrary {
     return ready
       .map((s) =>
         s.kind === "dir"
-          ? `- [${s.id}] 目录「${s.name}」 ${s.files ?? 0} 个文本文件`
+          ? `- [${s.id}] 目录「${s.name}」 ${s.files ?? 0} 个文本文件${s.allowBash ? "（可用 source_bash 执行查看命令）" : ""}`
           : `- [${s.id}] 文件「${s.name}」${s.pages ? ` ${s.pages} 页` : ` ${Math.round(s.size / 1024)}KB`}`,
       )
       .join("\n");

@@ -91,6 +91,54 @@ function DirPicker({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** 直接填写目录路径；下面列出用过的目录，一键添加 */
+function DirQuickAdd({ state, onBrowse }: { state: ClientState; onBrowse: () => void }) {
+  const [path, setPath] = useState("");
+  const added = new Set(state.sources.filter((s) => s.kind === "dir").map((s) => s.path));
+  const recent = state.recentDirs.filter((d) => !added.has(d.path));
+  const add = (p: string) => {
+    if (!p.trim()) return;
+    client.send({ type: "sources:addDir", path: p.trim() });
+    setPath("");
+  };
+  return (
+    <div className="dir-quick">
+      <div className="dir-quick-row">
+        <input
+          value={path}
+          placeholder="粘贴本地目录路径，如 ~/projects/my-app"
+          onChange={(e) => setPath(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (e.key === "Enter") add(path);
+          }}
+        />
+        <button className="primary" disabled={!path.trim()} onClick={() => add(path)}>
+          添加
+        </button>
+        <button className="ghost" onClick={onBrowse} title="浏览本机文件夹">
+          浏览…
+        </button>
+      </div>
+      {recent.length > 0 && (
+        <div className="recent-dirs">
+          <div className="muted">最近使用</div>
+          {recent.slice(0, 8).map((d) => (
+            <div key={d.path} className="recent-dir" title={d.path}>
+              <span className="recent-name" onClick={() => add(d.path)}>
+                📁 {d.name} <span className="muted">{d.path.replace(/^\/Users\/[^/]+/, "~")}</span>
+              </span>
+              <button className="icon ghost" title="从最近使用中移除" onClick={() => client.send({ type: "recentDirs:forget", path: d.path })}>
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SourcesPanel({ state }: { state: ClientState }) {
   const [picking, setPicking] = useState(false);
   const [msg, setMsg] = useState("");
@@ -138,9 +186,6 @@ export function SourcesPanel({ state }: { state: ClientState }) {
           <button onClick={() => folderInput.current?.click()} title="上传整个文件夹（如代码库），会跳过 node_modules、.git 等">
             上传文件夹
           </button>
-          <button onClick={() => setPicking(!picking)} title="直接读取本机目录，不复制（仅本机运行时可用）">
-            本地目录
-          </button>
         </div>
         <input
           ref={fileInput}
@@ -170,6 +215,7 @@ export function SourcesPanel({ state }: { state: ClientState }) {
           }}
         />
         {msg && <div className="sources-msg">{msg}</div>}
+        <DirQuickAdd state={state} onBrowse={() => setPicking(!picking)} />
       </div>
       {picking && <DirPicker onDone={() => setPicking(false)} />}
       <div className="source-list">
@@ -179,7 +225,7 @@ export function SourcesPanel({ state }: { state: ClientState }) {
             <br />
             可以上传 PDF、Word、TXT、Markdown、代码文件，
             <br />
-            或添加一个本地目录（例如代码库）。也可以把文件拖到这里。
+            或在上面填一个本地目录（例如代码库）。也可以把文件拖到这里。
           </div>
         )}
         {state.sources.map((s) => (
@@ -190,6 +236,16 @@ export function SourcesPanel({ state }: { state: ClientState }) {
                 {s.name}
               </div>
               <div className="source-meta">{metaOf(s)}</div>
+              {s.kind === "dir" && s.status === "ready" && (
+                <label className="source-bash" title="允许 AI 在这个目录里执行查看类命令（git log、wc、ls、cat…）；会拦截明显的修改操作，但这不是安全隔离">
+                  <input
+                    type="checkbox"
+                    checked={!!s.allowBash}
+                    onChange={(e) => client.send({ type: "sources:bash", id: s.id, allow: e.target.checked })}
+                  />
+                  允许 AI 执行查看命令
+                </label>
+              )}
             </div>
             <button className="icon ghost" title="移除（不会删除本地目录里的文件）" onClick={() => client.send({ type: "sources:remove", id: s.id })}>
               ×

@@ -35,7 +35,7 @@ ${CANVAS_RULES}
 - 用户选中的节点是当前关注点，新内容默认挂在它下面。
 - 需要最新信息或核实事实时，用 web_search 联网搜索（必要时 web_fetch 读原文），把来源链接写进节点正文。
 - 耗时较长的调研或大规模整理，用 dispatch_task 派给后台 agent。
-- 用户提供了参考资料（文件、代码库目录）时，用 source_search 定位、source_read 阅读、source_tree 看目录结构，结论写进节点并注明出处（文件名:行号 或 页码）。不要凭空猜测资料内容。
+- 用户提供了参考资料（文件、代码库目录）时，用 source_search 定位、source_read 阅读、source_tree 看目录结构，需要时用 source_bash 执行查看命令（如 git log、wc -l），结论写进节点并注明出处（文件名:行号 或 页码）。不要凭空猜测资料内容。
 - 用中文，直接、紧凑。用户可能在你工作时继续追加或插入消息，请自然衔接。`;
 
 const TASK_PROMPTS: Record<TaskKind, string> = {
@@ -160,6 +160,9 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
       break;
     case "source_search":
       label = `搜索资料：${args?.query ?? ""}`;
+      break;
+    case "source_bash":
+      label = `执行：${String(args?.command ?? "").slice(0, 80)}`;
       break;
   }
   const resolved = nodeId ? store.resolve(nodeId)?.id : undefined;

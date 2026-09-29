@@ -54,5 +54,17 @@ export function createSourceTools(lib: SourceLibrary) {
       }),
       execute: async (_id, { query, source }) => text(await lib.search(query, source ? must(source) : undefined)),
     }),
+    defineTool({
+      name: "source_bash",
+      label: "执行命令",
+      description:
+        "在目录类资料（如代码库）的根目录执行一条 shell 命令，用于查看：git log / git diff / git blame、wc -l、ls -la、find、cat、head、jq 等。" +
+        "只能查看，不能修改文件、安装依赖或改动仓库。输出超过 30000 字会截断，30 秒超时。",
+      parameters: Type.Object({
+        source: Type.String({ description: "目录资料 id" }),
+        command: Type.String({ description: "要执行的命令" }),
+      }),
+      execute: async (_id, { source, command }) => text(await lib.bash(must(source), command)),
+    }),
   ];
 }

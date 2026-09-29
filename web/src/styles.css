@@ -498,3 +498,21 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .version-compare { margin-left: auto; font-size: 11.5px; padding: 1px 8px; visibility: hidden; }
 .version-row:hover .version-compare, .version-compare:focus { visibility: visible; }
 .version-head.comparing { color: var(--edit); background: rgba(224, 175, 104, 0.12); }
+
+/* 目录快速添加 */
+.dir-quick { display: flex; flex-direction: column; gap: 6px; }
+.dir-quick-row { display: flex; gap: 6px; }
+.dir-quick-row input {
+  flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px;
+  padding: 5px 8px; outline: none; font-size: 12.5px; font-family: ui-monospace, Menlo, monospace;
+}
+.dir-quick-row input:focus { border-color: var(--accent); }
+.dir-quick-row button { font-size: 12.5px; flex: none; }
+.recent-dirs { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.recent-dir { display: flex; align-items: center; gap: 4px; border-radius: 5px; }
+.recent-dir:hover { background: var(--node-2); }
+.recent-name { flex: 1; min-width: 0; padding: 3px 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-dir .icon { visibility: hidden; padding: 0 6px; }
+.recent-dir:hover .icon { visibility: visible; }
+.source-bash { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin-top: 2px; cursor: pointer; }
+.source-bash input { margin: 0; }
