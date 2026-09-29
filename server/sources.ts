@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, extname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 import type { Source } from "./types.ts";
@@ -136,12 +136,42 @@ export class SourceLibrary {
     return src;
   }
 
+  /**
+   * 上传整个文件夹：文件按相对路径存到 uploads/<id>-<name>/ 下，
+   * 之后和本地目录资料完全一样使用（产品化后替代“选择本地目录”）。
+   */
+  async addUploadedFolder(name: string, files: { path: string; buf: Buffer }[]): Promise<Source> {
+    const id = nanoid(8);
+    const safeName = basename(name).replace(/[^\w.\-一-龥]+/g, "_") || "folder";
+    const root = join(this.uploads, `${id}-${safeName}`);
+    mkdirSync(root, { recursive: true });
+    let size = 0;
+    for (const f of files) {
+      const parts = f.path.split(/[\\/]+/).filter((p) => p && p !== "." && p !== "..");
+      if (!parts.length || parts.some((p) => SKIP_DIRS.has(p))) continue;
+      const abs = join(root, ...parts);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, f.buf);
+      size += f.buf.length;
+    }
+    const src: Source = { id, kind: "dir", name, path: realpathSync(root), size, status: "processing", uploaded: true, addedAt: Date.now() };
+    this.sources.push(src);
+    this.save();
+    const list = await this.listFiles(src);
+    Object.assign(src, { status: list.length ? "ready" : "error", files: list.length, error: list.length ? undefined : "文件夹里没有可读的文本文件" });
+    this.save();
+    return src;
+  }
+
   remove(id: string) {
     const src = this.sources.find((s) => s.id === id);
     if (!src) return;
     if (src.kind === "file") {
       rmSync(src.path, { force: true });
       rmSync(`${src.path}.txt`, { force: true });
+    } else if (src.uploaded && src.path.startsWith(realpathSync(this.boardDir) + sep)) {
+      // 上传的文件夹才删除；本地目录只是引用，绝不删除
+      rmSync(src.path, { recursive: true, force: true });
     }
     this.sources = this.sources.filter((s) => s.id !== id);
     this.save();

@@ -210,10 +210,12 @@ class Client {
   }
 
   /** 上传参考资料到当前白板 */
-  async uploadSources(files: File[]) {
+  async uploadSources(files: File[], folder?: string) {
     const form = new FormData();
-    for (const f of files) form.append("files", f, f.name);
-    const res = await fetch(`/api/boards/${this.state.board}/sources`, { method: "POST", body: form });
+    // 上传文件夹时带上相对路径（去掉最外层的文件夹名）
+    for (const f of files) form.append("files", f, folder ? f.webkitRelativePath.split("/").slice(1).join("/") || f.name : f.name);
+    const q = folder ? `?folder=${encodeURIComponent(folder)}` : "";
+    const res = await fetch(`/api/boards/${this.state.board}/sources${q}`, { method: "POST", body: form });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error ?? `上传失败（${res.status}）`);
     return data as { added: string[]; rejected: string[] };

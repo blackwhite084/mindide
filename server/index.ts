@@ -35,14 +35,28 @@ boards.onChange = broadcastBoards;
 
 const app = Fastify({ bodyLimit: 1024 * 1024 });
 await app.register(websocket);
-await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024, files: 50 } });
+// preservePath：上传文件夹时文件名带相对路径
+await app.register(multipart, { preservePath: true, limits: { fileSize: 100 * 1024 * 1024, files: 5000 } });
 
 /** 上传参考资料（可多选）。以后做成产品时，上传整个文件夹也走这里 */
-app.post<{ Params: { board: string } }>("/api/boards/:board/sources", async (req, reply) => {
+app.post<{ Params: { board: string }; Querystring: { folder?: string } }>("/api/boards/:board/sources", async (req, reply) => {
   if (!boards.has(req.params.board)) return reply.code(404).send({ error: "白板不存在" });
   const ws = await boards.get(req.params.board);
   const added: string[] = [];
   const rejected: string[] = [];
+  // 上传文件夹：文件名是相对路径，整体作为一个目录资料
+  if (req.query.folder) {
+    const files: { path: string; buf: Buffer }[] = [];
+    for await (const part of req.files()) {
+      if (!isSupported(part.filename)) {
+        part.file.resume();
+        continue;
+      }
+      files.push({ path: part.filename, buf: await part.toBuffer() });
+    }
+    ws.sources.addUploadedFolder(req.query.folder, files);
+    return { added: [`${req.query.folder}/（${files.length} 个文件）`], rejected };
+  }
   for await (const part of req.files()) {
     if (!isSupported(part.filename)) {
       rejected.push(part.filename);

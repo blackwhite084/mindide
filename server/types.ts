@@ -131,6 +131,8 @@ export interface Source {
   files?: number;
   status: "processing" | "ready" | "error";
   error?: string;
+  /** 目录是上传的（存在白板目录里），而不是引用的本地目录 */
+  uploaded?: boolean;
   addedAt: number;
 }
 

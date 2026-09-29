@@ -4,14 +4,21 @@ import { client, type ClientState } from "./client.ts";
 
 /** 客户端判断：哪些文件可以作为资料上传（与服务端 isSupported 保持一致的宽松版本） */
 export const SOURCE_ACCEPT =
-  ".pdf,.docx,.txt,.md,.markdown,.csv,.json,.yaml,.yml,.toml,.xml,.html,.js,.jsx,.ts,.tsx,.py,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cs,.php,.rb,.sh,.sql,.log";
+  ".pdf,.docx,.txt,.md,.markdown,.mdx,.csv,.json,.yaml,.yml,.toml,.ini,.xml,.html,.css,.scss,.js,.jsx,.mjs,.cjs,.ts,.tsx,.vue,.svelte," +
+  ".py,.go,.rs,.java,.kt,.swift,.c,.h,.cc,.cpp,.hpp,.cs,.php,.rb,.lua,.dart,.sh,.sql,.graphql,.proto,.gradle,.log";
+
+const exts = new Set(SOURCE_ACCEPT.split(","));
+const isSourceFile = (name: string) => {
+  const m = name.toLowerCase().match(/\.[^.]+$/);
+  return m ? exts.has(m[0]) : /^(Dockerfile|Makefile|README|LICENSE)$/.test(name);
+};
 
 const kb = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 function metaOf(s: Source) {
   if (s.status === "processing") return s.kind === "dir" ? "正在扫描…" : "正在提取文字…";
   if (s.status === "error") return s.error ?? "出错";
-  if (s.kind === "dir") return `${s.files ?? 0} 个文本文件 · ${s.path}`;
+  if (s.kind === "dir") return `${s.files ?? 0} 个文本文件 · ${s.uploaded ? "上传的文件夹" : s.path}`;
   return [s.pages ? `${s.pages} 页` : "", kb(s.size)].filter(Boolean).join(" · ");
 }
 
@@ -89,12 +96,13 @@ export function SourcesPanel({ state }: { state: ClientState }) {
   const [msg, setMsg] = useState("");
   const [over, setOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
 
-  const upload = async (files: File[]) => {
+  const upload = async (files: File[], folder?: string) => {
     if (!files.length) return;
     setMsg("上传中…");
     try {
-      const { added, rejected } = await client.uploadSources(files);
+      const { added, rejected } = await client.uploadSources(files, folder);
       setMsg(
         [added.length ? `已添加 ${added.length} 个文件` : "", rejected.length ? `不支持：${rejected.join("、")}` : ""]
           .filter(Boolean)
@@ -127,7 +135,12 @@ export function SourcesPanel({ state }: { state: ClientState }) {
         <span className="muted">AI 会按需查阅这里的资料，并在节点里注明出处</span>
         <div className="sources-actions">
           <button onClick={() => fileInput.current?.click()}>上传文件</button>
-          <button onClick={() => setPicking(!picking)}>添加本地目录</button>
+          <button onClick={() => folderInput.current?.click()} title="上传整个文件夹（如代码库），会跳过 node_modules、.git 等">
+            上传文件夹
+          </button>
+          <button onClick={() => setPicking(!picking)} title="直接读取本机目录，不复制（仅本机运行时可用）">
+            本地目录
+          </button>
         </div>
         <input
           ref={fileInput}
@@ -137,6 +150,22 @@ export function SourcesPanel({ state }: { state: ClientState }) {
           hidden
           onChange={(e) => {
             upload([...(e.target.files ?? [])]);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={folderInput}
+          type="file"
+          hidden
+          // @ts-expect-error 非标准属性：选择文件夹
+          webkitdirectory=""
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])];
+            const folder = files[0]?.webkitRelativePath.split("/")[0];
+            // 只传能读的文本文件，跳过依赖和构建产物
+            const skip = /(^|\/)(node_modules|\.git|dist|build|\.next|target|__pycache__|\.venv|venv)(\/|$)/;
+            const keep = files.filter((f) => !skip.test(f.webkitRelativePath) && isSourceFile(f.name));
+            if (folder) upload(keep, folder);
             e.target.value = "";
           }}
         />
