@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { DATA_DIR } from "./paths.ts";
 import type { ThinkingLevel } from "./types.ts";
 
 /** 全局设置：模型、思考强度等，跨白板共享 */
@@ -9,7 +10,7 @@ export interface Settings {
   thinking: ThinkingLevel;
 }
 
-const FILE = resolve("data/settings.json");
+const FILE = join(DATA_DIR, "settings.json");
 
 export const settings: Settings = { thinking: "low" };
 

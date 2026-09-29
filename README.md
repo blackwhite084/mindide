@@ -4,8 +4,13 @@
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
+npm run dev        # 开发：http://localhost:5173
+
+npm run build      # 生产：构建前端
+npm start          # 同一个端口提供页面和接口：http://localhost:5174
 ```
+
+环境变量：`PORT`（默认 5174）、`HOST`（默认 127.0.0.1）、`AI_MINDER_DATA`（数据目录，默认 `<项目>/data`）。
 
 ## 操作
 

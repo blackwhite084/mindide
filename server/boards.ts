@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { nanoid } from "nanoid";
+import { DATA_DIR } from "./paths.ts";
 import { firstLine } from "./store.ts";
 import type { BoardMeta } from "./types.ts";
 import { Workspace } from "./workspace.ts";
@@ -21,7 +22,7 @@ export class BoardManager {
   private file: string;
   onChange: (() => void) | undefined;
 
-  constructor(private dataDir = resolve("data")) {
+  constructor(private dataDir = DATA_DIR) {
     this.file = join(dataDir, "boards.json");
     mkdirSync(join(dataDir, "boards"), { recursive: true });
     if (existsSync(this.file)) {

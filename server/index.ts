@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { WEB_DIST } from "./paths.ts";
 import { isSupported } from "./sources.ts";
 import { listModels } from "./agents.ts";
 import { BoardManager } from "./boards.ts";
@@ -73,8 +74,7 @@ app.get<{ Querystring: { path?: string } }>("/api/fs/dirs", async (req, reply) =
   }
 });
 
-const dist = resolve("web/dist");
-if (existsSync(dist)) await app.register(fastifyStatic, { root: dist });
+if (existsSync(WEB_DIST)) await app.register(fastifyStatic, { root: WEB_DIST });
 
 app.get("/ws", { websocket: true }, async (socket) => {
   const send: Send = (msg) => socket.readyState === 1 && socket.send(JSON.stringify(msg));
@@ -154,5 +154,5 @@ async function handle(msg: ClientMsg, ws: Workspace, attach: (id: string) => Pro
   }
 }
 
-await app.listen({ port: PORT, host: "127.0.0.1" });
+await app.listen({ port: PORT, host: process.env.HOST ?? "127.0.0.1" });
 console.log(`[server] http://127.0.0.1:${PORT}`);
