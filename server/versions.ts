@@ -8,7 +8,12 @@ interface Version extends VersionMeta {
   board: Board;
   /** 主 agent 当时的对话上下文，回到该版本时一并恢复 */
   messages: unknown[];
+  /** 当时所在的对话；早期版本没有，属于迁移时的默认对话 */
+  conversationId?: string;
 }
+
+/** 没有多对话之前的那个对话 */
+export const LEGACY_CONVERSATION = "default";
 
 /**
  * 版本树：每个版本是白板 + AI 对话上下文的完整快照。
@@ -22,6 +27,7 @@ export class VersionTree {
   constructor(
     private file: string,
     private store: BoardStore,
+    private conversation: () => string | null,
   ) {
     if (existsSync(file)) {
       const data = JSON.parse(readFileSync(file, "utf8"));
@@ -35,7 +41,7 @@ export class VersionTree {
   }
 
   metas(): VersionMeta[] {
-    return this.versions.map(({ board: _b, messages: _m, ...meta }) => meta);
+    return this.versions.map(({ board: _b, messages: _m, conversationId: _c, ...meta }) => meta);
   }
 
   broadcast() {
@@ -47,7 +53,10 @@ export class VersionTree {
     const board = structuredClone(this.store.board);
     board.nodes = board.nodes.filter((n) => !n.draft);
     const prev = this.head ? this.get(this.head) : undefined;
+    const conversationId = this.conversation() ?? undefined;
     if (!force && prev && sameBoard(prev.board, board)) {
+      // 换了对话：旧版本属于别的对话，保持原样（对话本身另有存储）
+      if ((prev.conversationId ?? LEGACY_CONVERSATION) !== conversationId) return prev;
       // 白板没变、只有对话变化时，更新当前版本的对话即可
       prev.messages = structuredClone(messages);
       prev.board.chat = board.chat;
@@ -62,6 +71,7 @@ export class VersionTree {
       nodeCount: board.nodes.length,
       board,
       messages: structuredClone(messages),
+      conversationId,
     };
     this.versions.push(v);
     this.head = v.id;
@@ -76,7 +86,11 @@ export class VersionTree {
     this.head = id;
     this.persist();
     this.broadcast();
-    return { board: structuredClone(v.board), messages: structuredClone(v.messages) };
+    return {
+      board: structuredClone(v.board),
+      messages: structuredClone(v.messages),
+      conversationId: v.conversationId ?? LEGACY_CONVERSATION,
+    };
   }
 
   private closed = false;

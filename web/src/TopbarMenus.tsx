@@ -56,7 +56,7 @@ export function TextForm({
   );
 }
 
-const ago = (t: number) => {
+export const ago = (t: number) => {
   const m = Math.round((Date.now() - t) / 60000);
   if (m < 1) return "刚刚";
   if (m < 60) return `${m} 分钟前`;

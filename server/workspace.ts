@@ -1,9 +1,10 @@
 import { join } from "node:path";
 import { MainAgent, TaskRunner } from "./agents.ts";
+import { ConversationStore } from "./conversations.ts";
 import { SourceLibrary } from "./sources.ts";
 import { BoardStore } from "./store.ts";
 import type { ClientMsg, ServerMsg } from "./types.ts";
-import { VersionTree } from "./versions.ts";
+import { LEGACY_CONVERSATION, VersionTree } from "./versions.ts";
 
 const MANUAL = new Set([
   "node:update",
@@ -29,6 +30,7 @@ export class Workspace {
   readonly main: MainAgent;
   readonly versions: VersionTree;
   readonly sources: SourceLibrary;
+  readonly conversations: ConversationStore;
   private manualTimer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -40,21 +42,59 @@ export class Workspace {
     this.sources.onChange = () => this.store.emit({ type: "sources", sources: this.sources.list() });
     this.tasks = new TaskRunner(this.store, this.sources);
     this.main = new MainAgent(this.store, this.tasks, this.sources);
-    this.versions = new VersionTree(join(dir, "versions.json"), this.store);
+    this.conversations = new ConversationStore(join(dir, "conversations.json"));
+    this.versions = new VersionTree(join(dir, "versions.json"), this.store, () => this.conversations.current);
   }
 
   async init() {
     await this.main.init();
-    this.main.onSettled = (label) => this.versions.commit(label, this.main.messages);
+    this.main.onSettled = (label) => {
+      this.versions.commit(label, this.main.messages);
+      this.syncConversation();
+    };
     this.tasks.onFinished = (task) => {
       if (!this.main.busy) this.versions.commit(`任务：${task.title}`, this.main.messages);
     };
-    if (!this.versions.head) this.versions.commit("起点", [], true);
-    else {
-      // 重新加载后恢复当前版本的 AI 对话上下文
-      const head = this.versions.get(this.versions.head);
-      if (head) this.main.restore(structuredClone(head.messages));
+    const current = this.conversations.current ? this.conversations.get(this.conversations.current) : undefined;
+    if (current) {
+      // 重新加载后恢复当前对话的 AI 上下文
+      this.main.restore(structuredClone(current.messages));
+    } else {
+      // 还没有多对话时：现有的对话记录和版本里的上下文就是默认对话
+      const head = this.versions.head ? this.versions.get(this.versions.head) : undefined;
+      const messages = head && (head.conversationId ?? LEGACY_CONVERSATION) === LEGACY_CONVERSATION ? head.messages : [];
+      this.conversations.create(LEGACY_CONVERSATION, structuredClone(this.store.board.chat), structuredClone(messages));
+      this.main.restore(structuredClone(messages));
     }
+    if (!this.versions.head) this.versions.commit("起点", [], true);
+  }
+
+  private syncConversation() {
+    this.conversations.sync(this.store.board.chat, this.main.messages);
+    this.broadcastConversations();
+  }
+
+  private broadcastConversations() {
+    this.store.emit(this.conversationsMsg());
+  }
+
+  private conversationsMsg(): ServerMsg {
+    return { type: "conversations", conversations: this.conversations.metas(), current: this.conversations.current };
+  }
+
+  /** 离开当前对话：停下 AI，存好当前对话 */
+  private async leaveConversation() {
+    clearTimeout(this.manualTimer);
+    await this.main.stop();
+    this.versions.commit("自动保存", this.main.messages);
+    this.conversations.sync(this.store.board.chat, this.main.messages);
+  }
+
+  private enterConversation(id: string) {
+    const c = this.conversations.activate(id);
+    this.store.replaceChat(structuredClone(c.chat));
+    this.main.restore(structuredClone(c.messages));
+    this.broadcastConversations();
   }
 
   /** 客户端切到这块白板时需要的全部状态 */
@@ -68,6 +108,7 @@ export class Workspace {
         busy: this.main.busy,
       },
       { type: "versions", versions: this.versions.metas(), head: this.versions.head },
+      this.conversationsMsg(),
       { type: "sources", sources: this.sources.list() },
     ];
   }
@@ -81,9 +122,11 @@ export class Workspace {
     clearTimeout(this.manualTimer);
     try {
       this.versions.commit("自动保存（退出前）", this.main.messages);
+      this.conversations.sync(this.store.board.chat, this.main.messages);
     } finally {
       this.store.flush();
       this.versions.flush();
+      this.conversations.flush();
     }
   }
 
@@ -93,6 +136,7 @@ export class Workspace {
     this.tasks.dispose();
     this.store.close();
     this.versions.close();
+    this.conversations.close();
   }
 
   /** 手动编辑停下来一会儿后记录一个版本 */
@@ -117,6 +161,26 @@ export class Workspace {
         break;
       case "queue:clear":
         main.clearQueue();
+        break;
+      case "chat:new":
+        if (!store.board.chat.length) break;
+        await this.leaveConversation();
+        this.enterConversation(this.conversations.create().id);
+        break;
+      case "chat:open":
+        if (msg.id === this.conversations.current || !this.conversations.get(msg.id)) break;
+        await this.leaveConversation();
+        this.enterConversation(msg.id);
+        break;
+      case "chat:delete":
+        if (msg.id !== this.conversations.current) {
+          this.conversations.remove(msg.id);
+          this.broadcastConversations();
+          break;
+        }
+        await main.stop();
+        this.conversations.remove(msg.id);
+        this.enterConversation(this.conversations.create().id);
         break;
       case "node:update":
         store.updateNode(msg.id, msg.patch);
@@ -213,14 +277,15 @@ export class Workspace {
         versions.commit(msg.label || "手动保存", main.messages, true);
         break;
       case "version:checkout": {
-        clearTimeout(this.manualTimer);
-        await main.stop();
         // 离开前把当前未记录的改动存下来，避免丢失
-        versions.commit("自动保存", main.messages);
+        await this.leaveConversation();
         const snap = versions.checkout(msg.id);
         if (!snap) break;
         store.replaceBoard(snap.board);
         main.restore(snap.messages);
+        // 回到该版本所在的对话，并回退到当时的进度
+        this.conversations.activate(snap.conversationId, structuredClone(snap.board.chat), structuredClone(snap.messages));
+        this.broadcastConversations();
         break;
       }
     }

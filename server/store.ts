@@ -327,6 +327,11 @@ export class BoardStore {
     this.emit({ type: "chat:delta", id, delta, field });
   }
 
+  replaceChat(chat: ChatEntry[]) {
+    this.board.chat = chat;
+    this.emit({ type: "chat:replace", chat });
+  }
+
   replaceBoard(board: Board) {
     this.board = normalizeBoard(board);
     this.emit({ type: "board:replace", board: this.board });

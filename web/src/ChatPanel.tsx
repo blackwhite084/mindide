@@ -1,8 +1,9 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Activity, BoardNode, ChatEntry } from "../../server/types.ts";
-import type { ClientState } from "./client.ts";
+import { client, type ClientState } from "./client.ts";
+import { ago } from "./TopbarMenus.tsx";
 import { ui } from "./ui.ts";
 
 /** 思考过程：生成中展开显示最后几行，结束后收起 */
@@ -92,6 +93,89 @@ const Entry = memo(function Entry({ entry, nodes }: { entry: ChatEntry; nodes?: 
   );
 });
 
+/** 当前对话的标题：第一条用户消息 */
+function titleOf(chat: ChatEntry[]) {
+  const first = chat.find((e) => e.role === "user")?.text.split("\n").find((l) => l.trim());
+  return first?.trim() || "新对话";
+}
+
+/** 历史对话列表（放在弹出菜单里，自己订阅状态，删除后即时刷新） */
+function HistoryList() {
+  const state = useSyncExternalStore(client.subscribe, client.getState);
+  const list = state.conversations.filter((c) => c.count > 0 || c.id === state.conversation);
+  return (
+    <div className="conv-list">
+      <div className="ctx-title">历史对话</div>
+      {list.map((c) => {
+        const current = c.id === state.conversation;
+        return (
+          <div
+            key={c.id}
+            className={`conv-item ${current ? "on" : ""}`}
+            onClick={() => {
+              ui.closeMenu();
+              if (!current) client.send({ type: "chat:open", id: c.id });
+            }}
+          >
+            <div className="conv-main">
+              <div className="conv-title">{current ? titleOf(state.chat) : c.title}</div>
+              <div className="ctx-hint">
+                {current ? "当前 · " : ""}
+                {c.count} 条消息 · {ago(c.updatedAt)}
+              </div>
+            </div>
+            {(!current || state.chat.length > 0) && (
+              <button
+                className="conv-del"
+                title="删除这个对话（白板内容不受影响）"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  client.send({ type: "chat:delete", id: c.id });
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChatHeader({ state }: { state: ClientState }) {
+  const others = state.conversations.filter((c) => c.id !== state.conversation && c.count > 0).length;
+  return (
+    <div className="chat-head">
+      <span className="chat-head-title" title={titleOf(state.chat)}>
+        {titleOf(state.chat)}
+      </span>
+      <button
+        className="icon-btn"
+        title="新对话（白板内容保留，AI 从头开始）"
+        disabled={!state.chat.length}
+        onClick={() => client.send({ type: "chat:new" })}
+      >
+        ＋
+      </button>
+      <button
+        className="icon-btn"
+        title="历史对话"
+        onClick={(e) => {
+          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          ui.openMenu({ x: r.right - 280, y: r.bottom + 6, items: [], form: <HistoryList /> });
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+          <circle cx="8" cy="8" r="6" />
+          <path d="M8 4.8V8l2.2 1.6" />
+        </svg>
+        {others > 0 && <span className="icon-count">{others}</span>}
+      </button>
+    </div>
+  );
+}
+
 export function ChatPanel({ state }: { state: ClientState }) {
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -101,25 +185,33 @@ export function ChatPanel({ state }: { state: ClientState }) {
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [state.chat]);
 
+  // 切换对话后回到底部
+  useEffect(() => {
+    stick.current = true;
+  }, [state.conversation]);
+
   return (
-    <div
-      ref={box}
-      className="chat"
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      }}
-    >
-      {state.chat.length === 0 && (
-        <div className="empty">
-          对话记录会出现在这里。
-          <br />
-          白板上只留下内容本身。
-        </div>
-      )}
-      {state.chat.map((e) => (
-        <Entry key={e.id} entry={e} nodes={e.role === "user" ? state.nodes : undefined} />
-      ))}
-    </div>
+    <>
+      <ChatHeader state={state} />
+      <div
+        ref={box}
+        className="chat"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+      >
+        {state.chat.length === 0 && (
+          <div className="empty">
+            对话记录会出现在这里。
+            <br />
+            白板上只留下内容本身。
+          </div>
+        )}
+        {state.chat.map((e) => (
+          <Entry key={e.id} entry={e} nodes={e.role === "user" ? state.nodes : undefined} />
+        ))}
+      </div>
+    </>
   );
 }

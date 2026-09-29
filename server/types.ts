@@ -162,6 +162,16 @@ export interface Source {
   addedAt: number;
 }
 
+/** 白板上的一个对话（可以新开对话、回到历史对话） */
+export interface ConversationMeta {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  /** 用户消息条数 */
+  count: number;
+}
+
 export interface VersionMeta {
   id: string;
   parentId: string | null;
@@ -179,6 +189,7 @@ export type ServerMsg =
   | { type: "snapshot"; board: Board; tasks: Task[]; queue: QueueState; busy: boolean }
   | { type: "board:replace"; board: Board }
   | { type: "versions"; versions: VersionMeta[]; head: string | null }
+  | { type: "conversations"; conversations: ConversationMeta[]; current: string | null }
   | { type: "node:upsert"; node: BoardNode; animate?: "create" }
   | { type: "node:edit"; id: string; field: EditField; before: string; after: string; by: string }
   | { type: "node:delete"; id: string }
@@ -188,6 +199,8 @@ export type ServerMsg =
   | { type: "group:delete"; id: string }
   | { type: "chat:upsert"; entry: ChatEntry }
   | { type: "chat:delta"; id: string; delta: string; field?: "text" | "thinking" }
+  /** 切换对话：整体替换对话记录 */
+  | { type: "chat:replace"; chat: ChatEntry[] }
   | { type: "boards"; boards: BoardMeta[]; current: string }
   | { type: "sources"; sources: Source[] }
   | { type: "version:board"; id: string; board: Board }
@@ -204,6 +217,10 @@ export type ClientMsg =
   | { type: "chat"; text: string; mode: "queue" | "steer"; contextNodeIds: string[] }
   | { type: "abort" }
   | { type: "queue:clear" }
+  /** 新开一个对话（白板内容不变，AI 从空上下文开始） */
+  | { type: "chat:new" }
+  | { type: "chat:open"; id: string }
+  | { type: "chat:delete"; id: string }
   | { type: "node:update"; id: string; patch: NodePatch }
   | { type: "node:create"; id: string; parentId: string | null; x?: number; y?: number; groupId?: string }
   | { type: "node:delete"; id: string }

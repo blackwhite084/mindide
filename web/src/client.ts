@@ -9,6 +9,7 @@ import type {
   BoardNode,
   ChatEntry,
   ClientMsg,
+  ConversationMeta,
   GroupPatch,
   NodePatch,
   QueueState,
@@ -24,6 +25,9 @@ export interface ClientState {
   edges: Map<string, BoardEdge>;
   groups: Map<string, BoardGroup>;
   chat: ChatEntry[];
+  /** 这块白板上的所有对话，current 是正在进行的 */
+  conversations: ConversationMeta[];
+  conversation: string | null;
   tasks: Map<string, Task>;
   queue: QueueState;
   busy: boolean;
@@ -51,6 +55,8 @@ class Client {
     edges: new Map(),
     groups: new Map(),
     chat: [],
+    conversations: [],
+    conversation: null,
     tasks: new Map(),
     queue: { steering: [], followUp: [] },
     busy: false,
@@ -191,6 +197,12 @@ class Client {
         this.set({ chat });
         break;
       }
+      case "chat:replace":
+        this.set({ chat: msg.chat });
+        break;
+      case "conversations":
+        this.set({ conversations: msg.conversations, conversation: msg.current });
+        break;
       case "chat:delta": {
         const field = msg.field ?? "text";
         this.set({ chat: s.chat.map((c) => (c.id === msg.id ? { ...c, [field]: (c[field] ?? "") + msg.delta } : c)) });
