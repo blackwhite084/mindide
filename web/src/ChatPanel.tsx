@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Activity, BoardNode, ChatEntry } from "../../server/types.ts";
@@ -9,12 +9,17 @@ import { ui } from "./ui.ts";
 function Thinking({ text, live }: { text: string; live: boolean }) {
   const [open, setOpen] = useState(false);
   const shown = live || open;
+  const boxRef = useRef<HTMLDivElement>(null);
+  // 生成中贴底滚动：旧内容整行滚出，而不是按字符截断
+  useLayoutEffect(() => {
+    if (live && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
+  }, [live, text]);
   return (
     <div className={`thinking-box ${live ? "live" : ""}`}>
       <div className="thinking-head" onClick={() => setOpen(!open)}>
         {live ? "思考中…" : "思考过程"} <span className="muted">{shown ? "▴" : "▾"}</span>
       </div>
-      {shown && <div className="thinking-text">{live ? text.slice(-400) : text}</div>}
+      {shown && <div ref={boxRef} className="thinking-text">{text}</div>}
     </div>
   );
 }
