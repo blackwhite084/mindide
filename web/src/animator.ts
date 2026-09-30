@@ -3,7 +3,8 @@ import { diffWords } from "diff";
 /**
  * 节点编辑动画：把 before → after 拆成若干改动块（hunk），
  * 串行播放：定位节点 → 标出要删的部分 → 逐字删掉 → 逐字打出新内容 → 高亮渐隐。
- * 修改动画全局只有一个播放队列，保证同一时刻只有一处在动；
+ * 修改动画全局只有一个播放队列，保证同一时刻只有一个节点在动；
+ * 积压时同一节点排队中的修改会合并成一次播放（正文和摘要同时播）。
  * 新建节点只是轻量地打出摘要，可以并行，不占用修改队列。
  */
 
@@ -27,14 +28,19 @@ export interface Frame {
   activeIndex: number;
 }
 
-interface Job {
-  nodeId: string;
-  field: Field;
+interface Change {
   before: string;
   after: string;
+}
+
+interface Job {
+  nodeId: string;
+  changes: Partial<Record<Field, Change>>;
   by: string;
   mode: "create" | "edit";
 }
+
+const frameKey = (nodeId: string, field: Field) => `${nodeId}:${field}`;
 
 class Cancelled extends Error {}
 
@@ -68,11 +74,11 @@ class Animator {
     return () => this.listeners.delete(fn);
   };
 
-  frame = (nodeId: string) => this.frames.get(nodeId);
+  frame = (nodeId: string, field: Field) => this.frames.get(frameKey(nodeId, field));
 
   /** 节点有排队中但未开始的修改时，返回应当先展示的旧内容 */
   pendingBefore(nodeId: string, field: Field): string | undefined {
-    return this.queue.find((j) => j.nodeId === nodeId && j.field === field)?.before;
+    return this.queue.find((j) => j.nodeId === nodeId && j.changes[field])?.changes[field]!.before;
   }
 
   /** 切换版本时丢弃所有动画 */
@@ -85,12 +91,22 @@ class Animator {
 
   enqueue(nodeId: string, field: Field, before: string, after: string, by: string, mode: "create" | "edit" = "edit") {
     if (before === after) return;
-    const job = { nodeId, field, before, after, by, mode };
     if (mode === "create") {
-      this.play(job).catch(() => {});
+      this.play({ nodeId, changes: { [field]: { before, after } }, by, mode }).catch(() => {});
       return;
     }
-    this.queue.push(job);
+    // 同一节点还没开始播的修改：合并成一次，从最早的旧内容直接播到最新内容
+    const queued = this.queue.find((j) => j.nodeId === nodeId);
+    if (queued) {
+      const prev = queued.changes[field];
+      if (!prev) queued.changes[field] = { before, after };
+      else if (prev.before === after) delete queued.changes[field];
+      else prev.after = after;
+      queued.by = by;
+      if (!queued.changes.md && !queued.changes.summary) this.queue.splice(this.queue.indexOf(queued), 1);
+    } else {
+      this.queue.push({ nodeId, changes: { [field]: { before, after } }, by, mode });
+    }
     this.notify();
     if (!this.running) this.run();
   }
@@ -99,10 +115,10 @@ class Animator {
     for (const fn of this.listeners) fn();
   }
 
-  private setFrame(id: string, f: Frame | undefined, gen: number) {
+  private setFrame(key: string, f: Frame | undefined, gen: number) {
     if (gen !== this.generation) throw new Cancelled();
-    if (f) this.frames.set(id, { ...f, segs: f.segs.map((s) => ({ ...s })) });
-    else this.frames.delete(id);
+    if (f) this.frames.set(key, { ...f, segs: f.segs.map((s) => ({ ...s })) });
+    else this.frames.delete(key);
     this.notify();
   }
 
@@ -115,7 +131,7 @@ class Animator {
       } catch (err) {
         if (!(err instanceof Cancelled)) {
           console.error(err);
-          this.frames.delete(job.nodeId);
+          for (const field of Object.keys(job.changes) as Field[]) this.frames.delete(frameKey(job.nodeId, field));
           this.notify();
         }
       }
@@ -123,13 +139,16 @@ class Animator {
     this.running = false;
   }
 
-  private async play({ nodeId, field, before, after, by, mode }: Job) {
+  private async play({ nodeId, changes, by, mode }: Job) {
     const create = mode === "create";
-    const segs = computeSegs(before, after);
-    const frame: Frame = { segs, phase: "enter", by, mode, field, activeIndex: -1 };
     const gen = this.generation;
-    const push = () => this.setFrame(nodeId, frame, gen);
-    push();
+    const fields = (Object.keys(changes) as Field[]).map((field) => {
+      const { before, after } = changes[field]!;
+      const frame: Frame = { segs: computeSegs(before, after), phase: "enter", by, mode, field, activeIndex: -1 };
+      const push = () => this.setFrame(frameKey(nodeId, field), frame, gen);
+      push();
+      return { frame, push };
+    });
     if (create) {
       // 新建不抢镜头：只有没有修改在播放时才顺带移过去
       if (!this.running) this.focus?.(nodeId);
@@ -137,6 +156,20 @@ class Animator {
       await withTimeout(this.focus?.(nodeId), 700);
       await sleep(220 / this.speed);
     }
+    // 正文和摘要同时播
+    await Promise.all(fields.map(({ frame, push }) => this.playFrame(frame, push)));
+    for (const f of fields) f.frame.phase = "settle";
+    for (const f of fields) f.push();
+    await sleep((create ? 250 : 900) / this.speed);
+    for (const f of fields) f.frame.phase = "fade";
+    for (const f of fields) f.push();
+    await sleep((create ? 450 : 700) / this.speed);
+    for (const field of Object.keys(changes) as Field[]) this.setFrame(frameKey(nodeId, field), undefined, gen);
+  }
+
+  private async playFrame(frame: Frame, push: () => void) {
+    const create = frame.mode === "create";
+    const { segs } = frame;
 
     // 把相邻的 del/ins 合成一个改动块
     const hunks: number[][] = [];
@@ -180,14 +213,7 @@ class Animator {
       if (!create) await sleep(140 / this.speed);
     }
 
-    frame.phase = "settle";
     frame.activeIndex = -1;
-    push();
-    await sleep((create ? 250 : 900) / this.speed);
-    frame.phase = "fade";
-    push();
-    await sleep((create ? 450 : 700) / this.speed);
-    this.setFrame(nodeId, undefined, gen);
   }
 
   private async tick(seg: Seg, mode: "del" | "ins", msPerChar: number, push: () => void) {

@@ -83,14 +83,14 @@ function useFollowActive(ref: React.RefObject<HTMLDivElement | null>, frame: Fra
 
 function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
   const { node, depth, color, childCount, detail, dropTarget, pending, dim, related, diff, beforeText } = data;
-  const frame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id));
-  const mdFrame = frame?.field === "md" ? frame : undefined;
-  const sumFrame = frame?.field === "summary" ? frame : undefined;
+  const mdFrame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id, "md"));
+  const sumFrame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id, "summary"));
+  const frame = mdFrame ?? sumFrame;
   const waitingMd = useSyncExternalStore(animator.subscribe, () =>
-    animator.frame(node.id)?.field === "md" ? undefined : animator.pendingBefore(node.id, "md"),
+    animator.frame(node.id, "md") ? undefined : animator.pendingBefore(node.id, "md"),
   );
   const waitingSum = useSyncExternalStore(animator.subscribe, () =>
-    animator.frame(node.id)?.field === "summary" ? undefined : animator.pendingBefore(node.id, "summary"),
+    animator.frame(node.id, "summary") ? undefined : animator.pendingBefore(node.id, "summary"),
   );
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
