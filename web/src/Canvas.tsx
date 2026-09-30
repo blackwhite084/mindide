@@ -359,7 +359,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
             ? [
                 {
                   label: n.kind === "widget" ? (n.open ? "收起组件" : "运行组件") : n.open ? "收起正文" : "展开正文",
-                  hint: "双击",
+                  hint: "双击/Space",
                   onClick: () => client.patchNode(id, { open: !n.open }),
                 },
               ]
@@ -569,16 +569,28 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   const createSiblingRef = useRef(createSibling);
   createSiblingRef.current = createSibling;
 
-  // 快捷键：选中一个节点时 Tab 新建子节点，⇧Tab 新建同级节点；⌘G 打包成分组
+  // 快捷键：选中一个节点时 Tab 新建子节点，⇧Tab 新建同级节点；⌘G 打包成分组；Space 展开/收起卡片正文
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t.closest("input, textarea, [contenteditable]")) return;
+      if (t.closest("input, textarea, [contenteditable], button")) return;
       const sel = rf.getNodes().filter((n) => n.selected && !isGroup(n));
+      if (!sel.length) return;
       // ⌘G：把选中的卡片打包成分组
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g" && sel.length) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
         e.preventDefault();
         client.createGroup(sel.map((n) => n.id));
+        return;
+      }
+      // Space：展开/收起选中卡片的正文（组件则是运行/收起）
+      if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.repeat && !ui.getMenu()) {
+        e.preventDefault();
+        for (const n of sel) {
+          const node = client.state.nodes.get(n.id);
+          if (node && !node.draft && detail === "summary" && node.md.trim()) {
+            client.patchNode(node.id, { open: !node.open });
+          }
+        }
         return;
       }
       if (e.key !== "Tab") return;
@@ -591,7 +603,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rf]);
+  }, [rf, detail]);
 
   // 按住 ⌥：分组里的卡片可以拖出框
   useEffect(() => {

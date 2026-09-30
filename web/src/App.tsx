@@ -94,7 +94,7 @@ function Shell() {
               ＋ 手动新建主题
             </button>
             <div className="empty-tips">
-              双击空白处新建主题 · 选中节点按 Tab 加子节点 · 双击节点展开 · 右键更多操作
+              双击空白处新建主题 · 选中节点按 Tab 加子节点 · 双击节点或按 Space 展开/收起 · 右键更多操作
             </div>
           </div>
         )}
