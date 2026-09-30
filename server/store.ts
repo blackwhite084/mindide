@@ -31,7 +31,7 @@ export class BoardStore {
 
   emit(msg: ServerMsg) {
     for (const fn of this.listeners) fn(msg);
-    if (msg.type !== "queue" && msg.type !== "busy") this.scheduleSave();
+    if (msg.type !== "queue" && msg.type !== "busy" && msg.type !== "history") this.scheduleSave();
   }
 
   private closed = false;

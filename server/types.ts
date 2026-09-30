@@ -205,6 +205,8 @@ export type ServerMsg =
   | { type: "models"; models: ModelInfo[]; current: string | null; thinking: ThinkingLevel }
   | { type: "queue"; queue: QueueState }
   | { type: "busy"; busy: boolean }
+  /** 可撤销 / 可重做的步数 */
+  | { type: "history"; undo: number; redo: number }
   | { type: "task:upsert"; task: Task }
   | { type: "task:delta"; id: string; delta: string }
   | { type: "error"; message: string };
@@ -251,6 +253,8 @@ export type ClientMsg =
   | { type: "version:get"; id: string }
   /** 把对比中发现被删除的节点恢复回来 */
   | { type: "node:restore"; node: BoardNode }
+  | { type: "undo" }
+  | { type: "redo" }
   | { type: "boards:switch"; id: string }
   | { type: "boards:create"; name: string }
   | { type: "boards:rename"; id: string; name: string }

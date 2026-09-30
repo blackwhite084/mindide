@@ -31,6 +31,8 @@ export interface ClientState {
   tasks: Map<string, Task>;
   queue: QueueState;
   busy: boolean;
+  /** 可撤销 / 可重做的步数 */
+  history: { undo: number; redo: number };
   errors: { id: number; message: string }[];
   versions: VersionMeta[];
   head: string | null;
@@ -60,6 +62,7 @@ class Client {
     tasks: new Map(),
     queue: { steering: [], followUp: [] },
     busy: false,
+    history: { undo: 0, redo: 0 },
     errors: [],
     versions: [],
     head: null,
@@ -213,6 +216,9 @@ class Client {
         break;
       case "busy":
         this.set({ busy: msg.busy });
+        break;
+      case "history":
+        this.set({ history: { undo: msg.undo, redo: msg.redo } });
         break;
       case "task:upsert": {
         const tasks = new Map(s.tasks);

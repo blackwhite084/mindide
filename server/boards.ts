@@ -89,7 +89,7 @@ export class BoardManager {
   private watch(ws: Workspace) {
     let timer: NodeJS.Timeout | undefined;
     ws.store.onMessage((msg) => {
-      if (msg.type === "queue" || msg.type === "busy" || msg.type === "versions") return;
+      if (msg.type === "queue" || msg.type === "busy" || msg.type === "versions" || msg.type === "history") return;
       clearTimeout(timer);
       timer = setTimeout(() => {
         const meta = this.index.boards.find((b) => b.id === ws.id);

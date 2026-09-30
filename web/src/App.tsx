@@ -39,6 +39,21 @@ function Shell() {
     setSelected([]);
   }, [rf]);
 
+  // ⌘Z 撤销，⇧⌘Z / ⌘Y 重做（输入框里交给浏览器自己处理）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if ((e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" || key === "y") {
+        e.preventDefault();
+        client.send({ type: key === "z" && !e.shiftKey ? "undo" : "redo" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // 切换白板：清掉选中，镜头看全局
   useEffect(() => {
     if (!state.board) return;
@@ -58,6 +73,14 @@ function Shell() {
           <NewBoardButton />
         </div>
         <div className="topbar-actions">
+          <div className="seg-toggle small">
+            <button title="撤销 ⌘Z" disabled={!state.history.undo} onClick={() => client.send({ type: "undo" })}>
+              ↶ 撤销
+            </button>
+            <button title="重做 ⇧⌘Z" disabled={!state.history.redo} onClick={() => client.send({ type: "redo" })}>
+              ↷ 重做
+            </button>
+          </div>
           <ModelMenu state={state} />
           <div className="seg-toggle small" title="节点默认显示摘要还是全文">
             <button className={detail === "summary" ? "on" : ""} onClick={() => setDetail("summary")}>

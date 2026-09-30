@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { MainAgent, TaskRunner } from "./agents.ts";
 import { ConversationStore } from "./conversations.ts";
 import { SourceLibrary } from "./sources.ts";
+import { BoardHistory } from "./history.ts";
 import { BoardStore } from "./store.ts";
 import type { ClientMsg, ServerMsg } from "./types.ts";
 import { LEGACY_CONVERSATION, VersionTree } from "./versions.ts";
@@ -20,8 +21,12 @@ const MANUAL = new Set([
   "group:update",
   "group:delete",
   "node:toGroup",
+  "undo",
+  "redo",
 ]);
 const LAYOUT_ONLY = ["x", "y", "pinned", "open", "fold"];
+/** 只改浏览状态，不算一步撤销 */
+const VIEW_ONLY = ["open", "fold"];
 
 /** 一块白板：内容、版本树、主对话 agent 和后台任务，彼此独立 */
 export class Workspace {
@@ -31,6 +36,7 @@ export class Workspace {
   readonly versions: VersionTree;
   readonly sources: SourceLibrary;
   readonly conversations: ConversationStore;
+  readonly history: BoardHistory;
   private manualTimer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -38,6 +44,7 @@ export class Workspace {
     dir: string,
   ) {
     this.store = new BoardStore(join(dir, "board.json"));
+    this.history = new BoardHistory(this.store);
     this.sources = new SourceLibrary(dir);
     this.sources.onChange = () => this.store.emit({ type: "sources", sources: this.sources.list() });
     this.tasks = new TaskRunner(this.store, this.sources);
@@ -109,6 +116,7 @@ export class Workspace {
       },
       { type: "versions", versions: this.versions.metas(), head: this.versions.head },
       this.conversationsMsg(),
+      this.history.msg(),
       { type: "sources", sources: this.sources.list() },
     ];
   }
@@ -132,6 +140,7 @@ export class Workspace {
 
   dispose() {
     clearTimeout(this.manualTimer);
+    this.history.dispose();
     this.main.dispose();
     this.tasks.dispose();
     this.store.close();
@@ -152,6 +161,10 @@ export class Workspace {
     const layoutOnly =
       (msg.type === "node:update" || msg.type === "group:update") && Object.keys(msg.patch).every((k) => LAYOUT_ONLY.includes(k));
     if (MANUAL.has(msg.type) && !layoutOnly) this.manualEdit();
+    if ((msg.type === "node:update" || msg.type === "group:update") && Object.keys(msg.patch).every((k) => VIEW_ONLY.includes(k))) {
+      this.history.quiet(() => (msg.type === "node:update" ? store.updateNode(msg.id, msg.patch) : store.updateGroup(msg.id, msg.patch)));
+      return;
+    }
     switch (msg.type) {
       case "chat":
         if (msg.text.trim()) main.chat(msg.text.trim(), msg.mode, msg.contextNodeIds);
@@ -258,6 +271,12 @@ export class Workspace {
       case "sources:remove":
         this.sources.remove(msg.id);
         break;
+      case "undo":
+        this.history.undo();
+        break;
+      case "redo":
+        this.history.redo();
+        break;
       case "node:restore": {
         const n = msg.node;
         if (store.get(n.id)) break;
@@ -282,6 +301,7 @@ export class Workspace {
         const snap = versions.checkout(msg.id);
         if (!snap) break;
         store.replaceBoard(snap.board);
+        this.history.clear();
         main.restore(snap.messages);
         // 回到该版本所在的对话，并回退到当时的进度
         this.conversations.activate(snap.conversationId, structuredClone(snap.board.chat), structuredClone(snap.messages));
