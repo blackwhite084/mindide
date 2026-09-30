@@ -273,7 +273,6 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .task.running .task-dot { background: var(--edit); animation: pulse 1s ease-in-out infinite; }
 .task.done .task-dot { background: var(--ai); }
 .task.error .task-dot { background: var(--danger); }
-.task-kind { font-size: 11px; color: var(--task); }
 .task-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-status { font-size: 11px; color: var(--muted); }
 .task-body { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; }

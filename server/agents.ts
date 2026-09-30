@@ -14,7 +14,7 @@ import { createCanvasTools, type ToolContext } from "./tools.ts";
 import { settings } from "./settings.ts";
 import { createSourceTools } from "./sourceTools.ts";
 import type { SourceLibrary } from "./sources.ts";
-import type { Activity, BoardNode, ModelInfo, Task, TaskKind, ThinkingLevel } from "./types.ts";
+import type { Activity, BoardNode, ModelInfo, Task, ThinkingLevel } from "./types.ts";
 import { WEB_TOOLS } from "./web.ts";
 
 const CANVAS_RULES = `白板是一棵（或几棵）思维树，面向内容而不是对话：
@@ -36,20 +36,18 @@ ${CANVAS_RULES}
 - 你的文字回复显示在侧边的对话记录中，只用一两句话说明你做了什么、或回答简单的问题。
 - 用户选中的节点是当前关注点，新内容默认挂在它下面。
 - 需要最新信息或核实事实时，用 web_search 联网搜索（必要时 web_fetch 读原文），把来源链接写进节点正文。
-- 耗时较长的调研或大规模整理，用 dispatch_task 派给后台 agent。
+- 耗时较长的深入调研或大规模整理，用 dispatch_task 派给后台 agent。
 - 用户提供了参考资料（文件、代码库目录）时，用 source_search 定位、source_read 阅读、source_tree 看目录结构，需要时用 source_bash 执行查看命令（如 git log、wc -l），结论写进节点并注明出处（文件名:行号 或 页码）。不要凭空猜测资料内容。
 - 用中文，直接、紧凑。用户可能在你工作时继续追加或插入消息，请自然衔接。`;
 
-const TASK_PROMPTS: Record<TaskKind, string> = {
-  research: `你是后台调研 agent。根据任务说明联网搜索（web_search，必要时 web_fetch 读原文），多角度收集信息；用户提供了参考资料时，也用 source_search / source_read 查阅，并注明出处。
-最终回答是一份中文 Markdown 报告，会作为节点放进白板：第一行用一句话写核心结论（纯文本，不加标题符号），之后分节列要点，最后附来源链接。
-可以用 canvas_read 读取相关节点作为背景。`,
-  organize: `你是后台整理 agent，负责整理白板内容。
+const TASK_PROMPT = `你是后台 agent，在用户继续思考的同时独立完成一项任务（调研、整理、归纳……）。
 
 ${CANVAS_RULES}
 
-先用 canvas_list / canvas_read 了解现状，再用工具归纳、合并、拆分、调整层级。完成后用两三句话总结你做了什么。`,
-};
+- 先用 canvas_list / canvas_read 了解现状，再动手。
+- 需要最新信息或核实事实时，用 web_search 联网搜索（必要时 web_fetch 读原文），把来源链接写进节点正文。
+- 用户提供了参考资料时，用 source_search / source_read 查阅，并注明出处。
+- 成果直接用工具写进白板；最终回答只用两三句话总结你做了什么。`;
 
 let runtimePromise: Promise<ModelRuntime> | undefined;
 export const getRuntime = () => (runtimePromise ??= ModelRuntime.create());
@@ -75,7 +73,7 @@ export async function resolveModel(key: string | undefined) {
 const thinkingFor = (model: { reasoning?: boolean } | undefined): ThinkingLevel =>
   model?.reasoning ? settings.thinking : "off";
 
-async function makeSession(systemPrompt: string, ctx: ToolContext, withWeb: boolean, sources?: SourceLibrary) {
+async function makeSession(systemPrompt: string, ctx: ToolContext, sources?: SourceLibrary) {
   const loader = new DefaultResourceLoader({
     cwd: process.cwd(),
     agentDir: getAgentDir(),
@@ -88,7 +86,7 @@ async function makeSession(systemPrompt: string, ctx: ToolContext, withWeb: bool
   await loader.reload();
   const customTools = [
     ...createCanvasTools(ctx),
-    ...(withWeb ? WEB_TOOLS : []),
+    ...WEB_TOOLS,
     ...(sources ? createSourceTools(sources) : []),
   ];
   const model = await resolveModel(settings.model);
@@ -258,9 +256,9 @@ export class MainAgent {
       by: "AI",
       defaultParent,
       claimDraft: (id) => this.drafts.claim(id),
-      dispatch: (kind, title, instructions, ids) => this.tasks.run(kind, title, instructions, ids.length ? ids : this.focus),
+      dispatch: (title, instructions, ids) => this.tasks.run(title, instructions, ids.length ? ids : this.focus),
     };
-    this.session = await makeSession(MAIN_PROMPT, ctx, true, this.sources);
+    this.session = await makeSession(MAIN_PROMPT, ctx, this.sources);
     this.session.subscribe((e) => this.onEvent(e));
     const m = this.session.model;
     console.log(`[main] model ${m?.provider}/${m?.id}`);
@@ -456,10 +454,9 @@ export class TaskRunner {
     private sources?: SourceLibrary,
   ) {}
 
-  run(kind: TaskKind, title: string, instructions: string, contextNodeIds: string[]): string {
+  run(title: string, instructions: string, contextNodeIds: string[]): string {
     const task: Task = {
       id: nanoid(6),
-      kind,
       title: title || firstLine(instructions, 24),
       instructions,
       contextNodeIds,
@@ -486,7 +483,7 @@ export class TaskRunner {
       defaultParent: () => anchor,
       claimDraft: (id) => drafts.claim(id),
     };
-    const session = await makeSession(TASK_PROMPTS[task.kind], ctx, task.kind === "research", this.sources);
+    const session = await makeSession(TASK_PROMPT, ctx, this.sources);
     this.sessions.set(task.id, session);
 
     let lastText = "";
@@ -541,24 +538,7 @@ export class TaskRunner {
     if (errorMessage && !lastText) {
       task.status = "error";
       task.log += `\n\n[错误] ${errorMessage}`;
-    } else {
-      task.status = "done";
-      const report = lastText.trim();
-      if (task.kind === "research" && report) {
-        const [head, ...rest] = report.split("\n");
-        const node = this.store.createNode(
-          {
-            kind: "task",
-            title: task.title,
-            summary: firstLine(head, 60),
-            md: rest.join("\n").trim() || report,
-            parentId: anchor,
-          },
-          true,
-        );
-        task.resultNodeId = node.id;
-      }
-    }
+    } else task.status = "done";
     this.store.upsertTask(task);
     this.onFinished?.(task);
   }

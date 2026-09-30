@@ -233,7 +233,7 @@ export class Workspace {
         store.moveToGroup(msg.id, msg.groupId, msg.x !== undefined && msg.y !== undefined ? { x: msg.x, y: msg.y } : undefined);
         break;
       case "task:create":
-        tasks.run(msg.kind, "", msg.instructions, msg.contextNodeIds);
+        tasks.run("", msg.instructions, msg.contextNodeIds);
         break;
       case "task:steer":
         tasks.steer(msg.id, msg.text);

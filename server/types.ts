@@ -104,11 +104,8 @@ export interface Board {
   chat: ChatEntry[];
 }
 
-export type TaskKind = "research" | "organize";
-
 export interface Task {
   id: string;
-  kind: TaskKind;
   title: string;
   instructions: string;
   contextNodeIds: string[];
@@ -236,7 +233,7 @@ export type ClientMsg =
   | { type: "group:delete"; id: string; withContent: boolean }
   /** 把节点（连同子树）移到某个分组（null 为不分组）；非主题会从原树上断开 */
   | { type: "node:toGroup"; id: string; groupId: string | null; x?: number; y?: number }
-  | { type: "task:create"; kind: TaskKind; instructions: string; contextNodeIds: string[] }
+  | { type: "task:create"; instructions: string; contextNodeIds: string[] }
   | { type: "task:steer"; id: string; text: string }
   | { type: "task:abort"; id: string }
   | {

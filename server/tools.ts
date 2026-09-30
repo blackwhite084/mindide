@@ -1,7 +1,6 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { firstLine, type BoardStore } from "./store.ts";
-import type { TaskKind } from "./types.ts";
 import { WIDGET_GUIDE } from "./widget.ts";
 
 export interface ToolContext {
@@ -10,7 +9,7 @@ export interface ToolContext {
   by: string;
   /** 新建节点未指定 parentId 时的默认父节点（通常是用户选中的节点） */
   defaultParent: () => string | null;
-  dispatch?: (kind: TaskKind, title: string, instructions: string, contextNodeIds: string[]) => string;
+  dispatch?: (title: string, instructions: string, contextNodeIds: string[]) => string;
   /** 领取流式生成时预先放上白板的草稿节点 */
   claimDraft?: (toolCallId: string) => string | undefined;
 }
@@ -284,16 +283,15 @@ export function createCanvasTools(ctx: ToolContext) {
         name: "dispatch_task",
         label: "派发任务",
         description:
-          "把耗时的工作派给后台 agent 异步执行，不阻塞对话。research：联网调研并产出报告节点；organize：整理、归纳、重构白板。",
+          "把耗时的工作（深入调研、大规模整理重构白板等）派给后台 agent 异步执行，不阻塞对话。后台 agent 可按需联网，结果直接写进白板。",
         parameters: Type.Object({
-          kind: Type.Union([Type.Literal("research"), Type.Literal("organize")]),
           title: Type.String({ description: "任务标题" }),
           instructions: Type.String({ description: "详细的任务说明" }),
-          contextNodeIds: Type.Optional(Type.Array(Type.String(), { description: "相关节点；报告会挂在第一个节点下" })),
+          contextNodeIds: Type.Optional(Type.Array(Type.String(), { description: "相关节点；新内容默认挂在第一个节点下" })),
         }),
-        execute: async (_id, { kind, title, instructions, contextNodeIds }) => {
+        execute: async (_id, { title, instructions, contextNodeIds }) => {
           const ids = (contextNodeIds ?? []).map((id) => must(ctx, id).id);
-          const taskId = dispatch(kind, title, instructions, ids);
+          const taskId = dispatch(title, instructions, ids);
           return result(`已派发任务 ${taskId}，结果会自动出现在白板上`);
         },
       }) as (typeof tools)[number],

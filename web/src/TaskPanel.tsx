@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Task, TaskKind } from "../../server/types.ts";
+import type { Task } from "../../server/types.ts";
 import { client, type ClientState } from "./client.ts";
 import { ui } from "./ui.ts";
 
@@ -19,7 +19,6 @@ function TaskCard({ task }: { task: Task }) {
     <div className={`task ${task.status}`}>
       <div className="task-head" onClick={() => setOpen(!open)}>
         <span className="task-dot" />
-        <span className="task-kind">{task.kind === "research" ? "调研" : "整理"}</span>
         <span className="task-title">{task.title}</span>
         <span className="task-status">{STATUS[task.status]}</span>
       </div>
@@ -72,31 +71,22 @@ function TaskCard({ task }: { task: Task }) {
 }
 
 export function TaskPanel({ state, selected }: { state: ClientState; selected: string[] }) {
-  const [kind, setKind] = useState<TaskKind>("research");
   const [text, setText] = useState("");
   const tasks = [...state.tasks.values()].sort((a, b) => b.createdAt - a.createdAt);
 
   const create = () => {
     if (!text.trim()) return;
-    client.send({ type: "task:create", kind, instructions: text.trim(), contextNodeIds: selected });
+    client.send({ type: "task:create", instructions: text.trim(), contextNodeIds: selected });
     setText("");
   };
 
   return (
     <>
       <div className="task-new">
-        <div className="seg-toggle">
-          <button className={kind === "research" ? "on" : ""} onClick={() => setKind("research")}>
-            联网调研
-          </button>
-          <button className={kind === "organize" ? "on" : ""} onClick={() => setKind("organize")}>
-            整理白板
-          </button>
-        </div>
         <textarea
           rows={3}
           value={text}
-          placeholder={kind === "research" ? "调研什么？报告会挂在选中的节点下" : "怎么整理？比如：把关于定价的讨论归纳成一个节点"}
+          placeholder="交给后台 agent 做什么？比如：调研竞品定价、把关于定价的讨论归纳成一个节点"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -111,7 +101,7 @@ export function TaskPanel({ state, selected }: { state: ClientState; selected: s
         </div>
       </div>
       <div className="task-list">
-        {tasks.length === 0 && <div className="empty">还没有任务。也可以直接让 AI「派个 agent 去查…」</div>}
+        {tasks.length === 0 && <div className="empty">还没有任务。也可以直接在对话里让 AI「派个 agent 去…」</div>}
         {tasks.map((t) => (
           <TaskCard key={t.id} task={t} />
         ))}
