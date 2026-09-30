@@ -58,7 +58,7 @@ function DiffText({ segs, frame, still }: { segs: Seg[]; frame?: Frame; still?: 
   );
 }
 
-function Markdown({ md }: { md: string }) {
+export function Markdown({ md }: { md: string }) {
   return (
     <div className="md">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: (p) => <a {...p} target="_blank" rel="noreferrer" /> }}>

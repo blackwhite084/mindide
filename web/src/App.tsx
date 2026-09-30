@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import { CardDetail } from "./CardDetail.tsx";
 import { Canvas } from "./Canvas.tsx";
 import { ChatPanel } from "./ChatPanel.tsx";
 import { client } from "./client.ts";
@@ -117,7 +118,7 @@ function Shell() {
               ＋ 手动新建主题
             </button>
             <div className="empty-tips">
-              双击空白处新建主题 · 选中节点按 Tab 加子节点 · 双击节点或按 Space 展开/收起 · 右键更多操作
+              双击空白处新建主题 · 选中节点按 Tab 加子节点 · 双击节点展开/收起 · 按 Space 弹窗看详情 · 右键更多操作
             </div>
           </div>
         )}
@@ -141,6 +142,7 @@ function Shell() {
       </main>
       <ContextMenu />
       <SearchPalette state={state} />
+      <CardDetail state={state} />
       {panel && (
         <aside className="panel">
           <div className="panel-tabs">

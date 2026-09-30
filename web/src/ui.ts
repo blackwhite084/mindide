@@ -17,6 +17,8 @@ type Fn = () => void;
 const menuListeners = new Set<Fn>();
 const editListeners = new Set<(id: string) => void>();
 let menu: MenuState | null = null;
+const detailListeners = new Set<Fn>();
+let detailId: string | null = null;
 
 export const ui = {
   /** 定位并选中节点（由画布注册） */
@@ -56,4 +58,18 @@ export const ui = {
     };
   },
   getMenu: () => menu,
+
+  /** 卡片详情弹窗：传 null 关闭 */
+  openDetail(id: string | null) {
+    if (detailId === id) return;
+    detailId = id;
+    for (const fn of detailListeners) fn();
+  },
+  subscribeDetail(fn: Fn) {
+    detailListeners.add(fn);
+    return () => {
+      detailListeners.delete(fn);
+    };
+  },
+  getDetail: () => detailId,
 };

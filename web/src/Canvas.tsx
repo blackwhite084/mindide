@@ -355,11 +355,12 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           { title: titleOf(n) },
           { label: "让 AI 改这个节点…", hint: "推荐", onClick: () => ui.askAI(id, titleOf(n)) },
           { sep: true },
+          { label: "查看详情", hint: "Space", onClick: () => ui.openDetail(id) },
           ...(n.md.trim() && detail === "summary"
             ? [
                 {
                   label: n.kind === "widget" ? (n.open ? "收起组件" : "运行组件") : n.open ? "收起正文" : "展开正文",
-                  hint: "双击/Space",
+                  hint: "双击",
                   onClick: () => client.patchNode(id, { open: !n.open }),
                 },
               ]
@@ -569,7 +570,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   const createSiblingRef = useRef(createSibling);
   createSiblingRef.current = createSibling;
 
-  // 快捷键：选中一个节点时 Tab 新建子节点，⇧Tab 新建同级节点；⌘G 打包成分组；Space 展开/收起卡片正文
+  // 快捷键：选中一个节点时 Tab 新建子节点，⇧Tab 新建同级节点；⌘G 打包成分组；Space 弹窗查看卡片详情
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
@@ -582,15 +583,11 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         client.createGroup(sel.map((n) => n.id));
         return;
       }
-      // Space：展开/收起选中卡片的正文（组件则是运行/收起）
+      // Space：弹窗查看选中卡片的详细内容
       if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.repeat && !ui.getMenu()) {
         e.preventDefault();
-        for (const n of sel) {
-          const node = client.state.nodes.get(n.id);
-          if (node && !node.draft && detail === "summary" && node.md.trim()) {
-            client.patchNode(node.id, { open: !node.open });
-          }
-        }
+        const node = client.state.nodes.get(sel[0].id);
+        if (node && !node.draft) ui.openDetail(node.id);
         return;
       }
       if (e.key !== "Tab") return;
@@ -603,7 +600,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rf, detail]);
+  }, [rf]);
 
   // 按住 ⌥：分组里的卡片可以拖出框
   useEffect(() => {
