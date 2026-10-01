@@ -2,7 +2,7 @@ import type { BoardEdge, BoardNode } from "../../server/types.ts";
 
 /** 导入导出用的精简结构（不含对话、布局状态） */
 export interface Fragment {
-  nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags">[];
+  nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side">[];
   edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[];
 }
 
@@ -58,7 +58,7 @@ export function toJSON(nodes: BoardNode[], edges: BoardEdge[]): string {
     format: "ai-minder",
     version: 1,
     exportedAt: new Date().toISOString(),
-    nodes: nodes.map(({ id, title, summary, md, parentId, kind, tags }) => ({ id, title, summary, md, parentId, kind, ...(tags?.length ? { tags } : {}) })),
+    nodes: nodes.map(({ id, title, summary, md, parentId, kind, tags, side }) => ({ id, title, summary, md, parentId, kind, ...(tags?.length ? { tags } : {}), ...(side ? { side } : {}) })),
     edges: edges.map(({ source, target, dir, label, reverseLabel }) => ({ source, target, dir, label, reverseLabel })),
   };
   return JSON.stringify(data, null, 2);
@@ -176,6 +176,7 @@ export function fromJSON(text: string): Fragment {
         parentId: n.parentId ?? null,
         kind: n.kind === "task" || n.kind === "widget" ? n.kind : "note",
         ...(Array.isArray(n.tags) && n.tags.length ? { tags: n.tags.map(String) } : {}),
+        ...(n.side === "left" || n.side === "right" || n.side === "bottom" ? { side: n.side } : {}),
       })),
     edges: (src.edges ?? [])
       .filter((e: any) => e && e.source && e.target)

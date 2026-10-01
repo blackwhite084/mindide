@@ -3,6 +3,9 @@
 /** note：普通内容节点；task：后台任务产出的报告；widget：组件，md 里是在沙箱中运行的 HTML */
 export type NodeKind = "note" | "task" | "widget";
 
+/** 节点相对父节点的位置：左边 / 右边 / 下边；没设置时跟随父级的展开方向 */
+export type NodeSide = "left" | "right" | "bottom";
+
 export interface Activity {
   id: string;
   tool: string;
@@ -67,6 +70,8 @@ export interface BoardNode {
   groupId?: string;
   /** 模型仍在生成中的草稿节点 */
   draft?: boolean;
+  /** 布局提示：放在父节点的哪一边（只对有父节点的节点有效） */
+  side?: NodeSide;
   /** 自定义标签：可以标记为任何东西（状态、类型、用户的偏好……），用于筛选和定位 */
   tags?: string[];
   lastEdit?: LastEdit;
@@ -210,7 +215,10 @@ export interface VersionMeta {
 
 export type NodePatch = Partial<
   Pick<BoardNode, "title" | "summary" | "md" | "x" | "y" | "pinned" | "open" | "fold" | "parentId" | "tags">
->;
+> & {
+  /** auto：清除设置，跟随父级 */
+  side?: NodeSide | "auto";
+};
 
 // ---------- 服务端 → 客户端 ----------
 export type ServerMsg =
@@ -278,7 +286,7 @@ export type ClientMsg =
       mode: "replace" | "merge";
       name: string;
       parentId?: string | null;
-      nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags">[];
+      nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side">[];
       edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[];
     }
   | { type: "version:checkout"; id: string }

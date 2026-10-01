@@ -257,6 +257,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           detail,
           dropTarget: dropTarget === id,
           pending: pendingIds.has(id),
+          mirror: layout.mirror.get(id) ?? false,
           dim: (!!focus && !focus.nodes.has(id)) || (!!state.tagFilter && !n.tags?.includes(state.tagFilter)),
           related: !!focus && focus.nodes.has(id) && !focus.primary.has(id),
           diff: diff?.nodes.get(id),
@@ -300,10 +301,20 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   const edges: Edge[] = useMemo(() => {
     const tree: Edge[] = [];
     for (const [child, parent] of layout.parent) {
+      // 连线从父节点朝向孩子的那一侧出发
+      const s = layout.side.get(child) ?? "right";
+      const mir = layout.mirror.get(child) ?? false;
+      const handles =
+        s === "left"
+          ? { sourceHandle: "l", targetHandle: "tr" }
+          : s === "bottom"
+            ? { sourceHandle: layout.mirror.get(parent) ? "bm" : "b", targetHandle: mir ? "tr" : "tl" }
+            : { sourceHandle: "r", targetHandle: "tl" };
       tree.push({
         id: `t-${child}`,
         source: parent,
         target: child,
+        ...handles,
         className: `tree-edge ${edgeState(focus, `t-${child}`)}`,
         style: { stroke: colorOf(layout.branch.get(child) ?? -1) },
         selectable: false,
@@ -355,6 +366,17 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           { title: `已选中 ${selected.length} 个节点` },
           { label: "让 AI 处理这些节点…", hint: "推荐", onClick: () => ui.focusComposer(`想让 AI 怎么处理这 ${selected.length} 个节点？`) },
           { label: "打包成分组", hint: "⌘G", onClick: () => client.createGroup(selected) },
+          ...(n.parentId
+            ? [
+                { title: "放在父节点的" },
+                ...(["auto", "left", "right", "bottom"] as const).map((s) => ({
+                  label: { auto: "跟随父级", left: "左边", right: "右边", bottom: "下边" }[s],
+                  hint: (n.side ?? "auto") === s ? "✓" : undefined,
+                  onClick: () => client.patchNode(id, { side: s, ...(n.pinned ? { pinned: false } : {}) }),
+                })),
+                { sep: true as const },
+              ]
+            : []),
           { label: "标签…", onClick: () => ui.openMenu({ x: e.clientX, y: e.clientY, items: [], form: <TagForm ids={selected} /> }) },
           { sep: true },
           { label: `删除 ${selected.length} 个节点`, danger: true, onClick: () => selected.forEach((sid) => client.send({ type: "node:delete", id: sid })) },

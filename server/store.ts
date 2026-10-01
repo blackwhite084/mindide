@@ -127,6 +127,7 @@ export class BoardStore {
       updatedAt: now,
       ...init,
     };
+    if (!isSide(node.side)) delete node.side;
     if (node.tags) {
       node.tags = normalizeTags(node.tags);
       if (!node.tags.length) delete node.tags;
@@ -138,7 +139,7 @@ export class BoardStore {
     return node;
   }
 
-  updateNode(id: string, patch: Partial<BoardNode>) {
+  updateNode(id: string, patch: Partial<Omit<BoardNode, "side">> & { side?: BoardNode["side"] | "auto" }) {
     const node = this.get(id);
     if (!node) return;
     if (patch.parentId !== undefined && patch.parentId !== null) {
@@ -152,6 +153,7 @@ export class BoardStore {
     // 主题从树上断开时留在原来的分组；挂到别的节点下则跟随新的主题
     if (patch.parentId === null && node.parentId && !("groupId" in patch)) patch.groupId = groupBefore;
     Object.assign(node, patch, { updatedAt: Date.now() });
+    if (!isSide(node.side)) delete node.side;
     if (node.tags && !node.tags.length) delete node.tags;
     if (node.parentId || !node.groupId || !this.getGroup(node.groupId)) delete node.groupId;
     // 换了分组：原来固定的位置是相对旧分组的，不再有意义
@@ -362,7 +364,7 @@ export class BoardStore {
   /** 导入一组节点和关系；merge 时重新分配 id，避免和现有节点冲突 */
   importNodes(
     mode: "replace" | "merge",
-    nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags">[],
+    nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side">[],
     edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[],
     parentId: string | null = null,
   ) {
@@ -375,6 +377,7 @@ export class BoardStore {
       title: n.title ?? "",
       summary: n.summary ?? "",
       md: n.md ?? "",
+      ...(isSide(n.side) ? { side: n.side } : {}),
       ...(Array.isArray(n.tags) && normalizeTags(n.tags).length ? { tags: normalizeTags(n.tags) } : {}),
       parentId: n.parentId && idMap.has(n.parentId) ? idMap.get(n.parentId)! : mode === "merge" ? parentId : null,
       pinned: false,
@@ -543,6 +546,8 @@ export class BoardStore {
   }
 }
 
+const isSide = (s: unknown): s is "left" | "right" | "bottom" => s === "left" || s === "right" || s === "bottom";
+
 export function normalizeTags(tags: readonly string[]): string[] {
   const out: string[] = [];
   for (const raw of tags) {
@@ -552,7 +557,8 @@ export function normalizeTags(tags: readonly string[]): string[] {
   return out.slice(0, 8);
 }
 
-const tagText = (n: BoardNode) => (n.tags?.length ? " " + n.tags.map((t) => `#${t}`).join(" ") : "");
+const SIDE_TEXT = { left: "{左}", right: "{右}", bottom: "{下}" };
+const tagText = (n: BoardNode) => (n.parentId && n.side ? ` ${SIDE_TEXT[n.side]}` : "") + (n.tags?.length ? " " + n.tags.map((t) => `#${t}`).join(" ") : "");
 
 function stripUndefined<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;

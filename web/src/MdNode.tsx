@@ -19,6 +19,8 @@ export type MdFlowNode = Node<
     detail: "summary" | "full";
     dropTarget: boolean;
     pending: boolean;
+    /** 向左展开（子树镜像） */
+    mirror?: boolean;
     /** 有选中项时，与之无关的节点淡化 */
     dim?: boolean;
     /** 与选中项直接相连的节点 */
@@ -83,7 +85,7 @@ function useFollowActive(ref: React.RefObject<HTMLDivElement | null>, frame: Fra
 }
 
 function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
-  const { node, depth, color, childCount, detail, dropTarget, pending, dim, related, diff, beforeText } = data;
+  const { node, depth, color, childCount, detail, dropTarget, pending, mirror, dim, related, diff, beforeText } = data;
   const mdFrame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id, "md"));
   const sumFrame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id, "summary"));
   const frame = mdFrame ?? sumFrame;
@@ -260,13 +262,15 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         dim && !frame && "dim",
         diff && `diff-${diff}`,
         related && "related",
+        mirror && "mirror",
         pending && !frame && "pending",
       ]
         .filter(Boolean)
         .join(" ")}
       style={{ "--c": color } as React.CSSProperties}
     >
-      <Handle type="target" position={Position.Left} />
+      <Handle id="tl" type="target" position={Position.Left} />
+      <Handle id="tr" type="target" position={Position.Right} isConnectable={false} className="handle-aux" />
       {editing ? (
         <div
           ref={editRef}
@@ -379,7 +383,17 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
           {node.fold ? childCount : "−"}
         </button>
       )}
-      <Handle type="source" position={Position.Right} />
+      <Handle id="r" type="source" position={Position.Right} />
+      <Handle id="l" type="source" position={Position.Left} isConnectable={false} className="handle-aux" />
+      <Handle id="b" type="source" position={Position.Bottom} isConnectable={false} className="handle-aux" style={{ left: 14 }} />
+      <Handle
+        id="bm"
+        type="source"
+        position={Position.Bottom}
+        isConnectable={false}
+        className="handle-aux"
+        style={{ left: "auto", right: 14, transform: "translate(50%, 50%)" }}
+      />
     </div>
   );
 }

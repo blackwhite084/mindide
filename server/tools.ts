@@ -37,6 +37,10 @@ async function widgetReport(ctx: ToolContext, id: string) {
 
 const tagAttr = (n: { tags?: string[] }) => (n.tags?.length ? ` tags="${n.tags.join(",")}"` : "");
 
+const SIDE_DESC =
+  "放在父节点的哪一边：left 左边、right 右边、bottom 下边（在父节点正下方，适合补充说明、结论或总结）；" +
+  "省略时跟随父节点的展开方向（默认向右）。子树会沿这个方向继续展开。适合把正反两面、对立方案分在左右两边。";
+
 const TAGS_DESC = "标签：自由文本的短标记（状态、类型、优先级……），不带 #；优先复用白板上已有的标签";
 
 function parentOf(ctx: ToolContext, parentId: string | null | undefined) {
@@ -146,15 +150,16 @@ export function createCanvasTools(ctx: ToolContext) {
       summary: Type.String({ description: "一句话要点摘要，≤ 40 字，折叠时展示" }),
       md: Type.String({ description: "正文 Markdown，可展开查看；没有更多细节时可以为空" }),
       tags: Type.Optional(Type.Array(Type.String(), { description: TAGS_DESC })),
+      side: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("bottom")], { description: SIDE_DESC })),
     }),
-    execute: async (toolCallId, { title, summary, md, parentId, tags }) => {
+    execute: async (toolCallId, { title, summary, md, parentId, tags, side }) => {
       const parent = parentOf(ctx, parentId);
       const draftId = ctx.claimDraft?.(toolCallId);
       if (draftId) {
-        ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false, ...(tags ? { tags } : {}) });
+        ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false, ...(tags ? { tags } : {}), ...(side ? { side } : {}) });
         return result(`已创建节点 ${draftId}`, draftId);
       }
-      const node = ctx.store.createNode({ title, summary, md, parentId: parent, groupId: topicGroup(ctx, parent), tags }, true);
+      const node = ctx.store.createNode({ title, summary, md, parentId: parent, groupId: topicGroup(ctx, parent), tags, side }, true);
       return result(`已创建节点 ${node.id}`, node.id);
     },
   });
@@ -199,9 +204,15 @@ export function createCanvasTools(ctx: ToolContext) {
       summary: Type.Optional(Type.String()),
       addTags: Type.Optional(Type.Array(Type.String(), { description: "要添加的" + TAGS_DESC })),
       removeTags: Type.Optional(Type.Array(Type.String(), { description: "要移除的标签" })),
+      side: Type.Optional(
+        Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("bottom"), Type.Literal("auto")], {
+          description: SIDE_DESC + " auto 表示清除设置。",
+        }),
+      ),
     }),
-    execute: async (_id, { id, edits, md, title, summary, addTags, removeTags }) => {
+    execute: async (_id, { id, edits, md, title, summary, addTags, removeTags, side }) => {
       const node = must(ctx, id);
+      if (side) ctx.store.updateNode(node.id, { side, ...(node.pinned ? { pinned: false } : {}) });
       if (addTags?.length || removeTags?.length) ctx.store.addRemoveTags(node.id, addTags, removeTags);
       let next = md ?? node.md;
       for (const e of edits ?? []) {
@@ -224,15 +235,21 @@ export function createCanvasTools(ctx: ToolContext) {
   const move = defineTool({
     name: "canvas_move_node",
     label: "调整结构",
-    description: "把节点（连同子树）挂到另一个父节点下，用于整理层级。parentId 传 root 表示变成独立主题。",
-    parameters: Type.Object({ id: Type.String(), parentId: Type.String() }),
-    execute: async (_id, { id, parentId }) => {
+    description: "把节点（连同子树）挂到另一个父节点下，用于整理层级。parentId 传 root 表示变成独立主题。可同时指定放在父节点的哪一边。",
+    parameters: Type.Object({
+      id: Type.String(),
+      parentId: Type.String(),
+      side: Type.Optional(
+        Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("bottom"), Type.Literal("auto")], { description: SIDE_DESC }),
+      ),
+    }),
+    execute: async (_id, { id, parentId, side }) => {
       const node = must(ctx, id);
       const target = parentOf(ctx, parentId);
       if (target && (target === node.id || ctx.store.isDescendant(target, node.id))) {
         throw new Error("不能挂到自己的子孙节点下");
       }
-      ctx.store.updateNode(node.id, { parentId: target });
+      ctx.store.updateNode(node.id, { parentId: target, ...(side ? { side } : {}) });
       return result(`已移动节点 ${node.id}`, node.id);
     },
   });

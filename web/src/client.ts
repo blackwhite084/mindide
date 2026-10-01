@@ -270,7 +270,11 @@ class Client {
     const n = this.state.nodes.get(id);
     if (!n) return;
     const nodes = new Map(this.state.nodes);
-    nodes.set(id, { ...n, ...patch });
+    const { side, ...rest } = patch;
+    const next = { ...n, ...rest };
+    if (side === "auto") delete next.side;
+    else if (side) next.side = side;
+    nodes.set(id, next);
     this.set({ nodes });
     this.send({ type: "node:update", id, patch });
   }

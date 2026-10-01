@@ -1,4 +1,4 @@
-import type { BoardEdge, BoardGroup, BoardNode } from "../../server/types.ts";
+import type { BoardEdge, BoardGroup, BoardNode, NodeSide } from "../../server/types.ts";
 
 export interface Size {
   w: number;
@@ -21,6 +21,10 @@ export interface Layout {
   groups: Map<string, GroupBox>;
   /** 可见节点 → 所在分组 */
   region: Map<string, string>;
+  /** 节点相对父节点的位置（根节点为 right） */
+  side: Map<string, NodeSide>;
+  /** 向左展开的节点（子树镜像）；下边的节点跟随父节点 */
+  mirror: Map<string, boolean>;
 }
 
 export interface GroupBox {
@@ -36,6 +40,9 @@ export interface GroupBox {
 const GAP_X = 72;
 const GAP_Y = 14;
 const GAP_ROOT = 90;
+/** 放在下边的节点：与父节点的垂直间距、向内缩进 */
+const GAP_B = 22;
+export const INDENT = 36;
 /** 同列关系弧线：第一条车道离卡片的距离、车道间距、给文字预留的宽度 */
 export const LANE_BASE = 26;
 export const LANE_STEP = 18;
@@ -115,6 +122,11 @@ export function layoutTree(
   const visible: string[] = [];
   let branchSeq = 0;
 
+  const side = new Map<string, NodeSide>();
+  const mirror = new Map<string, boolean>();
+  /** 一路向右展开（同一列的卡片 x 对齐，关系线才能用车道） */
+  const pure = new Map<string, boolean>();
+
   const visit = (n: BoardNode, d: number, b: number, g: string | undefined) => {
     depth.set(n.id, d);
     branch.set(n.id, b);
@@ -123,8 +135,13 @@ export function layoutTree(
     const cs = kids.get(n.id) ?? [];
     childCount.set(n.id, cs.length);
     if (n.fold) return;
+    const mir = mirror.get(n.id) ?? false;
     for (const c of cs) {
       parent.set(c.id, n.id);
+      const s: NodeSide = c.side ?? (mir ? "left" : "right");
+      side.set(c.id, s);
+      mirror.set(c.id, s === "left" ? true : s === "right" ? false : mir);
+      pure.set(c.id, s === "right" && !!pure.get(n.id));
       visit(c, d + 1, d === 0 ? branchSeq++ : b, g);
     }
   };
@@ -134,6 +151,9 @@ export function layoutTree(
     const g = groupOf(r);
     // 折叠的分组里的卡片不显示
     if (g && groupById.get(g)!.fold) continue;
+    side.set(r.id, "right");
+    mirror.set(r.id, false);
+    pure.set(r.id, true);
     visit(r, 0, -1, g);
   }
 
@@ -145,6 +165,7 @@ export function layoutTree(
     .filter((e) => order.has(e.source) && order.has(e.target))
     .filter((e) => depth.get(e.source) === depth.get(e.target) && !byId.get(e.source)!.pinned && !byId.get(e.target)!.pinned)
     .filter((e) => region.get(e.source) === region.get(e.target))
+    .filter((e) => pure.get(e.source) && pure.get(e.target))
     .map((e) => {
       const [a, b] = [order.get(e.source)!, order.get(e.target)!].sort((x, y) => x - y);
       return { e, a, b, d: depth.get(e.source)! };
@@ -167,14 +188,25 @@ export function layoutTree(
   const size = (id: string): Size => sizes.get(id) ?? { w: widthOf(depth.get(id) ?? 2), h: 64 };
   const layoutKids = (id: string) =>
     byId.get(id)!.fold ? [] : (kids.get(id) ?? []).filter((c) => !c.pinned);
+  /** 按位置把子节点分成右 / 左 / 下三组 */
+  const parts = (id: string) => {
+    const all = layoutKids(id);
+    const by = (s: NodeSide) => all.filter((c) => side.get(c.id) === s);
+    return { r: by("right"), l: by("left"), b: by("bottom") };
+  };
 
+  const stackH = (cs: BoardNode[]) => cs.reduce((sum, c) => sum + subtreeH(c.id), 0) + Math.max(0, cs.length - 1) * GAP_Y;
+  /** 节点自己所在的这一行的高度：左右两侧子树里较高的一个 */
+  const midH = (id: string) => {
+    const p = parts(id);
+    return Math.max(size(id).h, stackH(p.r), stackH(p.l));
+  };
   const heightMemo = new Map<string, number>();
   const subtreeH = (id: string): number => {
     const cached = heightMemo.get(id);
     if (cached !== undefined) return cached;
-    const cs = layoutKids(id);
-    const childrenH = cs.reduce((sum, c) => sum + subtreeH(c.id), 0) + Math.max(0, cs.length - 1) * GAP_Y;
-    const h = Math.max(size(id).h, childrenH);
+    const b = parts(id).b;
+    const h = midH(id) + (b.length ? GAP_B + stackH(b) : 0);
     heightMemo.set(id, h);
     return h;
   };
@@ -182,13 +214,23 @@ export function layoutTree(
   const pos = new Map<string, { x: number; y: number }>();
   const place = (id: string, x: number, top: number) => {
     const s = size(id);
-    const H = subtreeH(id);
-    pos.set(id, { x, y: top + (H - s.h) / 2 });
-    const cs = layoutKids(id);
-    const childrenH = cs.reduce((sum, c) => sum + subtreeH(c.id), 0) + Math.max(0, cs.length - 1) * GAP_Y;
-    let y = top + (H - childrenH) / 2;
-    for (const c of cs) {
-      place(c.id, x + s.w + gapAfter(depth.get(id) ?? 0), y);
+    const p = parts(id);
+    const mid = midH(id);
+    pos.set(id, { x, y: top + (mid - s.h) / 2 });
+    const gap = gapAfter(depth.get(id) ?? 0);
+    let y = top + (mid - stackH(p.r)) / 2;
+    for (const c of p.r) {
+      place(c.id, x + s.w + gap, y);
+      y += subtreeH(c.id) + GAP_Y;
+    }
+    y = top + (mid - stackH(p.l)) / 2;
+    for (const c of p.l) {
+      place(c.id, x - GAP_X - size(c.id).w, y);
+      y += subtreeH(c.id) + GAP_Y;
+    }
+    y = top + mid + GAP_B;
+    for (const c of p.b) {
+      place(c.id, mirror.get(id) ? x + s.w - INDENT - size(c.id).w : x + INDENT, y);
       y += subtreeH(c.id) + GAP_Y;
     }
   };
@@ -198,8 +240,7 @@ export function layoutTree(
     for (const id of visible) {
       const n = byId.get(id)!;
       if (!n.pinned || region.get(id) !== g) continue;
-      const H = subtreeH(id);
-      place(id, n.x, n.y - (H - size(id).h) / 2);
+      place(id, n.x, n.y - (midH(id) - size(id).h) / 2);
     }
   };
 
@@ -268,5 +309,5 @@ export function layoutTree(
     pos.set(id, { x: p.x + o.x, y: p.y + o.y });
   }
 
-  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region };
+  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region, side, mirror };
 }

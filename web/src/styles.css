@@ -708,3 +708,6 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .tag-chip.dim { opacity: 0.7; }
 .tag-count { opacity: 0.6; }
 .tag-bar { display: flex; flex-wrap: wrap; gap: 4px; max-width: 60vw; align-items: center; }
+
+.react-flow__handle.handle-aux { opacity: 0 !important; pointer-events: none; }
+.mdnode.mirror .fold-btn { right: auto; left: -11px; }
