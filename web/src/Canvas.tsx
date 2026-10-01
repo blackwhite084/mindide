@@ -21,6 +21,7 @@ import { client, type ClientState } from "./client.ts";
 import { representative, scopeMap, scopeOf, scopePath } from "../../server/scope.ts";
 import { GROUP_HEAD, GROUP_PAD, groupKey, layoutTree, type Size } from "./layout.ts";
 import { GroupNode, type GroupFlowNode } from "./GroupNode.tsx";
+import { WallNode, type WallFlowNode } from "./WallNode.tsx";
 import { MdNode, type MdFlowNode } from "./MdNode.tsx";
 import { diffBoards, fullText } from "./compare.ts";
 import { RelationEdge } from "./RelationEdge.tsx";
@@ -28,8 +29,8 @@ import { RelationForm } from "./RelationForm.tsx";
 import { ui, type MenuItem } from "./ui.ts";
 import { TagBar, TagForm } from "./Tags.tsx";
 
-const nodeTypes = { md: MdNode, group: GroupNode };
-type FlowNode = MdFlowNode | GroupFlowNode;
+const nodeTypes = { md: MdNode, group: GroupNode, wall: WallNode };
+type FlowNode = MdFlowNode | GroupFlowNode | WallFlowNode;
 /** 分组里的卡片能到达的范围（相对分组的框）：左边和上边有界，右边和下边拖过去框会撑大 */
 const CARD_EXTENT: CoordinateExtent = [
   [8, GROUP_HEAD + 4],
@@ -432,7 +433,27 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           className: p ? undefined : "enter",
         };
       });
-      return [...groupNodes, ...cards];
+      // 无序卡片墙的虚线框：画在卡片下面，不可交互
+      const wallNodes = layout.walls
+        .filter((w) => layout.pos.has(w.child))
+        .map((w): WallFlowNode => {
+          const gid = layout.region.get(w.child);
+          const box = gid ? layout.groups.get(gid) : undefined;
+          return {
+            id: `wall:${w.id}`,
+            type: "wall",
+            position: box ? { x: w.x - box.x, y: w.y - box.y } : { x: w.x, y: w.y },
+            parentId: gid ? groupKey(gid) : undefined,
+            data: { color: colorOf(layout.branch.get(w.child) ?? -1) },
+            style: { width: w.w, height: w.h },
+            selectable: false,
+            draggable: false,
+            deletable: false,
+            connectable: false,
+            focusable: false,
+          };
+        });
+      return [...groupNodes, ...wallNodes, ...cards];
     });
     // 用 focusKey 而不是 focus 作依赖：只有高亮的节点集合变了才需要重建
   }, [state.nodes, layout, detail, dropTarget, pendingShown, focusKey, diff, groupList, groupStats, dropGroup, dragBox, altHeld, state.tagFilter, subStats, rel]);
@@ -717,7 +738,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   const findDropTarget = (id: string) => {
     const self = rf.getNode(id);
     if (!self) return null;
-    const hits = rf.getIntersectingNodes(self).filter((n) => !isGroup(n) && n.id !== id && !isDescendant(n.id, id));
+    const hits = rf.getIntersectingNodes(self).filter((n) => !isGroup(n) && n.type !== "wall" && n.id !== id && !isDescendant(n.id, id));
     return hits[0]?.id ?? null;
   };
 
@@ -936,7 +957,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         zoomable
         className="minimap"
         nodeBorderRadius={6}
-        nodeColor={(n) => (isGroup(n) ? `${(n.data as GroupFlowNode["data"]).color}33` : (n.data as MdFlowNode["data"]).color)}
+        nodeColor={(n) => (isGroup(n) || n.type === "wall" ? `${(n.data as GroupFlowNode["data"]).color}33` : (n.data as MdFlowNode["data"]).color)}
       />
       <Panel position="top-left" className="canvas-top">
         <Breadcrumb state={state} />

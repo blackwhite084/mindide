@@ -29,6 +29,8 @@ export interface Layout {
   cols: Map<string, number>;
   /** 有序父节点下的子节点 → 序号（从 1 开始） */
   seq: Map<string, number>;
+  /** 卡片墙的虚线框（绝对坐标）；child 是墙里的第一张卡片，用来取颜色和所在分组 */
+  walls: { id: string; child: string; x: number; y: number; w: number; h: number }[];
 }
 
 export interface GroupBox {
@@ -49,6 +51,8 @@ const GAP_B = 22;
 /** 无序的叶子兄弟铺成多列卡片墙：至少几个才铺、列间距 */
 const WALL_MIN = 5;
 const GAP_WALL = 20;
+/** 卡片墙虚线框离卡片的距离 */
+export const WALL_PAD = 10;
 export const INDENT = 36;
 /** 同列关系弧线：第一条车道离卡片的距离、车道间距、给文字预留的宽度 */
 export const LANE_BASE = 26;
@@ -222,6 +226,8 @@ export function layoutTree(
   const pure = new Map<string, boolean>();
   /** 铺成卡片墙的节点 */
   const wall = new Set<string>();
+  /** 卡片墙的框，相对所属父节点的左上角 */
+  const wallRel = new Map<string, { child: string; x: number; y: number; w: number; h: number }[]>();
 
   const visit = (n: BoardNode, d: number, b: number, g: string | undefined) => {
     depth.set(n.id, d);
@@ -347,6 +353,7 @@ export function layoutTree(
       }
       const dy = s.h / 2 - Math.max(...cols.map((c) => c.h)) / 2;
       let edge = dir === 1 ? s.w + gap : -GAP_X;
+      const first = out.pos.length;
       for (const col of cols) {
         if (!col.items.length) continue;
         let y = dy;
@@ -357,6 +364,19 @@ export function layoutTree(
         }
         edge = dir === 1 ? edge + col.w + GAP_WALL : edge - col.w - GAP_WALL;
       }
+      // 框住整面墙；同时占住这块地方，别的兄弟子树不会挤进框里
+      const ids = new Set(cs.map((c) => c.id));
+      const [x0, y0, x1, y1] = out.pos.slice(first).reduce(
+        ([a, b, c, d], [cid, x, y]) => {
+          if (!ids.has(cid)) return [a, b, c, d];
+          const z = size(cid);
+          return [Math.min(a, x), Math.min(b, y), Math.max(c, x + z.w), Math.max(d, y + z.h)];
+        },
+        [Infinity, Infinity, -Infinity, -Infinity],
+      );
+      const box = { x: x0 - WALL_PAD, y: y0 - WALL_PAD, w: x1 - x0 + WALL_PAD * 2, h: y1 - y0 + WALL_PAD * 2 };
+      out.rects.push(box);
+      wallRel.set(id, [...(wallRel.get(id) ?? []), { child: cs[0]!.id, ...box }]);
     };
     if (p.r.length && wall.has(p.r[0]!.id)) masonry(p.r, 1);
     else column(p.r, () => s.w + gap);
@@ -500,5 +520,11 @@ export function layoutTree(
     pos.set(id, { x: p.x + o.x, y: p.y + o.y });
   }
 
-  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region, side, mirror, cols, seq };
+  const walls: Layout["walls"] = [];
+  for (const [pid, list] of wallRel) {
+    const p = pos.get(pid);
+    if (p) for (const w of list) walls.push({ id: `${pid}:${w.child}`, child: w.child, x: p.x + w.x, y: p.y + w.y, w: w.w, h: w.h });
+  }
+
+  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region, side, mirror, cols, seq, walls };
 }

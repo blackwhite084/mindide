@@ -761,3 +761,14 @@ button.crumb:hover { color: var(--text); background: var(--node-2); }
   line-height: 18px;
   text-align: center;
 }
+
+/* 无序卡片墙的虚线框 */
+.react-flow__node-wall { pointer-events: none !important; }
+.wall-box {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1.5px dashed color-mix(in srgb, var(--wc) 60%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--wc) 5%, transparent);
+}
