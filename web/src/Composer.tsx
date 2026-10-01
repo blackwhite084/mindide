@@ -79,6 +79,15 @@ export function Composer({ state, selected, onClearSelection, chatVisible, onOpe
       requestAnimationFrame(() => ta.current?.focus());
     };
   }, []);
+  const [pick, setPick] = useState(0);
+  // 输入 / 开头且还没输入空格时，列出可用技能
+  const slash = /^\/(?:skill:)?([\w-]*)$/.exec(text);
+  const matches = slash ? state.skills.filter((s) => s.name.includes(slash[1])) : [];
+  const choose = (name: string) => {
+    setText(`/skill:${name} `);
+    setPick(0);
+    ta.current?.focus();
+  };
   const { queue, busy } = state;
   const queued = [...queue.steering.map((t) => ({ t, steer: true })), ...queue.followUp.map((t) => ({ t, steer: false }))];
 
@@ -95,6 +104,23 @@ export function Composer({ state, selected, onClearSelection, chatVisible, onOpe
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // 输入法组字（含语音输入法）时的回车不发送
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (matches.length) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setPick((p) => (p + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length);
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey)) {
+        e.preventDefault();
+        choose(matches[Math.min(pick, matches.length - 1)].name);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setText("");
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send(e.metaKey || e.ctrlKey ? "steer" : "queue");
@@ -139,6 +165,23 @@ export function Composer({ state, selected, onClearSelection, chatVisible, onOpe
           </button>
         </div>
       )}
+      {matches.length > 0 && (
+        <div className="skill-menu">
+          {matches.map((s, i) => (
+            <div
+              key={s.name}
+              className={`skill-item ${i === Math.min(pick, matches.length - 1) ? "active" : ""}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                choose(s.name);
+              }}
+            >
+              <span className="skill-name">/skill:{s.name}</span>
+              <span className="muted">{s.description}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="composer-box">
         <textarea
           ref={ta}
@@ -150,6 +193,7 @@ export function Composer({ state, selected, onClearSelection, chatVisible, onOpe
           onBlur={() => !text && setHint(undefined)}
           onChange={(e) => {
             setText(e.target.value);
+            setPick(0);
             e.target.style.height = "auto";
             e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
           }}

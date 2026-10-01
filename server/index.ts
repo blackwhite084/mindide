@@ -9,6 +9,7 @@ import { dirname, resolve } from "node:path";
 import { WEB_DIST } from "./paths.ts";
 import { isSupported } from "./sources.ts";
 import { listModels } from "./agents.ts";
+import { listSkills } from "./skills.ts";
 import { BoardManager } from "./boards.ts";
 import { forgetDir, rememberDir, saveSettings, settings } from "./settings.ts";
 import type { ClientMsg, ServerMsg } from "./types.ts";
@@ -113,6 +114,7 @@ app.get("/ws", { websocket: true }, async (socket) => {
   const ready = (async () => {
     send(boardsMsg(boards.current));
     send(await modelsMsg());
+    send({ type: "skills", skills: listSkills() });
     send({ type: "recentDirs", dirs: settings.recentDirs });
     await attach(boards.current);
   })();

@@ -2,6 +2,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { firstLine, type BoardStore } from "./store.ts";
 import { WIDGET_GUIDE } from "./widget.ts";
+import { findSkill, listSkills, skillBlock } from "./skills.ts";
 
 export interface ToolContext {
   store: BoardStore;
@@ -12,6 +13,8 @@ export interface ToolContext {
   dispatch?: (title: string, instructions: string, contextNodeIds: string[]) => string;
   /** 领取流式生成时预先放上白板的草稿节点 */
   claimDraft?: (toolCallId: string) => string | undefined;
+  /** 允许使用技能（use_skill） */
+  skills?: boolean;
 }
 
 const result = (s: string, nodeId?: string) => ({
@@ -337,6 +340,23 @@ export function createCanvasTools(ctx: ToolContext) {
           const ids = (contextNodeIds ?? []).map((id) => must(ctx, id).id);
           const taskId = dispatch(title, instructions, ids);
           return result(`已派发任务 ${taskId}，结果会自动出现在白板上`);
+        },
+      }) as (typeof tools)[number],
+    );
+  }
+
+  if (ctx.skills) {
+    tools.push(
+      defineTool({
+        name: "use_skill",
+        label: "使用技能",
+        description:
+          "读取一个技能（固定的工作流程）并按它的流程工作。用户的需求明显符合系统提示里列出的某个技能、而用户没有指定时使用。",
+        parameters: Type.Object({ name: Type.String({ description: "技能名" }) }),
+        execute: async (_id, { name }) => {
+          const skill = findSkill(name);
+          if (!skill) throw new Error(`技能 ${name} 不存在，可用：${listSkills().map((s) => s.name).join("、") || "（无）"}`);
+          return result(`${skillBlock(skill)}\n\n现在按这个技能的流程开始。`);
         },
       }) as (typeof tools)[number],
     );

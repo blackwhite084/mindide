@@ -192,6 +192,12 @@ export interface ConversationMeta {
   count: number;
 }
 
+/** 技能：一套固定的工作流程，用 /skill:name 指定或由 AI 通过 use_skill 读取 */
+export interface SkillInfo {
+  name: string;
+  description: string;
+}
+
 export interface VersionMeta {
   id: string;
   parentId: string | null;
@@ -225,6 +231,7 @@ export type ServerMsg =
   | { type: "sources"; sources: Source[] }
   | { type: "version:board"; id: string; board: Board }
   | { type: "recentDirs"; dirs: { path: string; name: string; lastUsed: number }[] }
+  | { type: "skills"; skills: SkillInfo[] }
   | { type: "models"; models: ModelInfo[]; current: string | null; thinking: ThinkingLevel }
   | { type: "queue"; queue: QueueState }
   | { type: "busy"; busy: boolean }

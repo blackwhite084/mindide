@@ -2,6 +2,7 @@ import type {
   Board,
   BoardMeta,
   ModelInfo,
+  SkillInfo,
   Source,
   ThinkingLevel,
   BoardEdge,
@@ -38,6 +39,7 @@ export interface ClientState {
   head: string | null;
   boards: BoardMeta[];
   board: string;
+  skills: SkillInfo[];
   models: ModelInfo[];
   model: string | null;
   thinking: ThinkingLevel;
@@ -68,6 +70,7 @@ class Client {
     head: null,
     boards: [],
     board: "",
+    skills: [],
     models: [],
     model: null,
     thinking: "low",
@@ -140,6 +143,9 @@ class Client {
         break;
       case "boards":
         this.set({ boards: msg.boards, board: msg.current });
+        break;
+      case "skills":
+        this.set({ skills: msg.skills });
         break;
       case "models":
         this.set({ models: msg.models, model: msg.current, thinking: msg.thinking });

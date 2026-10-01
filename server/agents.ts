@@ -16,6 +16,7 @@ import { createSourceTools } from "./sourceTools.ts";
 import type { SourceLibrary } from "./sources.ts";
 import type { Activity, BoardNode, ModelInfo, Task, ThinkingLevel } from "./types.ts";
 import { WEB_TOOLS } from "./web.ts";
+import { findSkill, skillBlock, skillsPrompt, parseSkillCommand } from "./skills.ts";
 
 const CANVAS_RULES = `白板是一棵（或几棵）思维树，面向内容而不是对话：
 - 一个节点只讲一个要点：标题 ≤ 16 字，summary 是一句话要点（≤ 40 字），md 是可展开的细节。
@@ -75,11 +76,11 @@ export async function resolveModel(key: string | undefined) {
 const thinkingFor = (model: { reasoning?: boolean } | undefined): ThinkingLevel =>
   model?.reasoning ? settings.thinking : "off";
 
-async function makeSession(systemPrompt: string, ctx: ToolContext, sources?: SourceLibrary) {
+async function makeSession(systemPrompt: () => string, ctx: ToolContext, sources?: SourceLibrary) {
   const loader = new DefaultResourceLoader({
     cwd: process.cwd(),
     agentDir: getAgentDir(),
-    systemPrompt,
+    systemPrompt: systemPrompt(),
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
@@ -160,6 +161,9 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
       break;
     case "dispatch_task":
       label = `派发任务「${args?.title ?? ""}」`;
+      break;
+    case "use_skill":
+      label = `使用技能：${args?.name ?? ""}`;
       break;
     case "ask_user": {
       const questions = Array.isArray(args?.questions) ? args.questions.filter((q: any) => q?.question) : [];
@@ -272,8 +276,9 @@ export class MainAgent {
       defaultParent,
       claimDraft: (id) => this.drafts.claim(id),
       dispatch: (title, instructions, ids) => this.tasks.run(title, instructions, ids.length ? ids : this.focus),
+      skills: true,
     };
-    this.session = await makeSession(MAIN_PROMPT, ctx, this.sources);
+    this.session = await makeSession(() => MAIN_PROMPT + skillsPrompt(), ctx, this.sources);
     this.session.subscribe((e) => this.onEvent(e));
     const m = this.session.model;
     console.log(`[main] model ${m?.provider}/${m?.id}`);
@@ -288,7 +293,13 @@ export class MainAgent {
   }
 
   chat(text: string, mode: "queue" | "steer", contextNodeIds: string[]) {
-    const prompt = this.composePrompt(text, contextNodeIds);
+    const cmd = parseSkillCommand(text);
+    const skill = cmd && findSkill(cmd.name);
+    if (cmd && !skill) {
+      this.store.emit({ type: "error", message: `技能 ${cmd.name} 不存在` });
+      return;
+    }
+    const prompt = this.composePrompt(text, contextNodeIds, skill ? skillBlock(skill) : undefined, cmd?.args);
     this.pending.set(prompt, { text, contextNodeIds });
     if (this.session.isStreaming && this.aiEntry) skipAsks(this.store, this.store.getChat(this.aiEntry)?.activity);
     const run = this.session.isStreaming
@@ -297,8 +308,9 @@ export class MainAgent {
     run.catch((err) => this.store.emit({ type: "error", message: String(err?.message ?? err) }));
   }
 
-  private composePrompt(text: string, contextNodeIds: string[]) {
+  private composePrompt(text: string, contextNodeIds: string[], skill?: string, skillArgs?: string) {
     const parts = [`[白板索引]\n${this.store.outline()}`];
+    if (skill) parts.push(`[用户指定的技能]\n${skill}`);
     const sources = this.sources?.outline();
     if (sources) parts.push(`[参考资料]\n${sources}`);
     const selected = contextNodeIds.map((id) => this.store.get(id)).filter(Boolean) as BoardNode[];
@@ -313,7 +325,7 @@ export class MainAgent {
             .join("\n"),
       );
     }
-    parts.push(`[用户消息]\n${text}`);
+    parts.push(`[用户消息]\n${skill ? skillArgs || "（按技能开始）" : text}`);
     return parts.join("\n\n");
   }
 
@@ -499,7 +511,7 @@ export class TaskRunner {
       defaultParent: () => anchor,
       claimDraft: (id) => drafts.claim(id),
     };
-    const session = await makeSession(TASK_PROMPT, ctx, this.sources);
+    const session = await makeSession(() => TASK_PROMPT, ctx, this.sources);
     this.sessions.set(task.id, session);
 
     let lastText = "";

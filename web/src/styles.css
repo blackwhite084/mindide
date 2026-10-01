@@ -694,3 +694,9 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .ol-arrow { width: 14px; flex: none; text-align: center; color: var(--muted); user-select: none; }
 .ol-arrow.leaf { font-size: 9px; opacity: 0.6; }
 .ol-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.skill-menu { display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 8px; margin-bottom: 6px; overflow: hidden; max-height: 220px; overflow-y: auto; background: var(--panel); }
+.skill-item { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; cursor: pointer; }
+.skill-item.active, .skill-item:hover { background: rgba(122, 162, 247, 0.14); }
+.skill-name { color: var(--accent); font-weight: 600; }
+.skill-item .muted { font-size: 12px; }
