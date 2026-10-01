@@ -92,7 +92,34 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     [state.compare, nodes, edgeList],
   );
   const groupList = useMemo(() => [...state.groups.values()].sort((a, b) => a.createdAt - b.createdAt), [state.groups]);
-  const layout = useMemo(() => layoutTree(nodes, sizes, edgeList, groupList), [nodes, sizes, edgeList, groupList]);
+  /** AI 一轮结束且新加了顶层主题：忽略已存的列号，重新分一次列 */
+  const [repack, setRepack] = useState(false);
+  const layout = useMemo(
+    () => layoutTree(nodes, sizes, edgeList, groupList, { repack }),
+    [nodes, sizes, edgeList, groupList, repack],
+  );
+  // 分列只在 AI 不工作时定下来并存到主题 / 分组上，之后手动编辑不会让树换列；
+  // 手动新建的主题排到最后一列，不影响其他树
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    const ended = wasBusy.current && !state.busy;
+    wasBusy.current = state.busy;
+    if (state.busy) return;
+    const stored = (key: string) =>
+      key.startsWith("group:") ? state.groups.get(key.slice(6))?.col : state.nodes.get(key)?.col;
+    if (ended && !repack && [...layout.cols.keys()].some((k) => stored(k) === undefined)) {
+      setRepack(true);
+      return;
+    }
+    // 等卡片都量好尺寸再定，否则列是按估计的高度分的
+    if (!layout.visible.every((id) => sizes.has(id))) return;
+    for (const [key, col] of layout.cols) {
+      if (stored(key) === col) continue;
+      if (key.startsWith("group:")) client.patchGroup(key.slice(6), { col });
+      else client.patchNode(key, { col });
+    }
+    if (repack) setRepack(false);
+  }, [layout, state.busy, state.nodes, state.groups, sizes, repack]);
   // 每个分组的主题标题和卡片数（折叠后显示）
   const groupStats = useMemo(() => {
     const stats = new Map<string, { topics: string[]; cards: number }>();

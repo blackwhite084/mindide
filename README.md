@@ -40,6 +40,6 @@ npm start          # 同一个端口提供页面和接口：http://localhost:517
 - `server/skills.ts` 技能（Agent Skills 格式的 SKILL.md）加载与注入
 - `server/web.ts` Exa 联网搜索与网页读取
 - `server/versions.ts` 版本树（白板 + 对话上下文快照）
-- `web/src/layout.ts` 思维导图自动布局（含同列关系线的车道分配）
+- `web/src/layout.ts` 思维导图自动布局（子树按轮廓贴紧、顶层多棵树自动分列、同列关系线的车道分配）；分列在 AI 每轮结束时定下来，手动编辑不会让树换列
 - `web/src/io.ts` 导出导入格式转换
 - `web/src/animator.ts` 修改动画：定位 → 标红待删 → 逐字删除 → 逐字写入 → 高亮渐隐

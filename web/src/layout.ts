@@ -25,6 +25,8 @@ export interface Layout {
   side: Map<string, NodeSide>;
   /** 向左展开的节点（子树镜像）；下边的节点跟随父节点 */
   mirror: Map<string, boolean>;
+  /** 顶层的主题（节点 id）和分组（groupKey）实际排在第几列；顶层有固定位置的东西时为空 */
+  cols: Map<string, number>;
 }
 
 export interface GroupBox {
@@ -123,7 +125,19 @@ function packColumns<T extends { lo: number; hi: number; h: number }>(items: T[]
   return best?.cols ?? [];
 }
 
-export const widthOf =(depth: number) => (depth === 0 ? 320 : depth === 1 ? 290 : 270);
+/** 按已经定下来的列号分列；没有列号的（新建的）排到最后一列末尾 */
+function storedColumns<T extends { col?: number }>(items: T[]): T[][] {
+  const last = Math.max(...items.map((it) => it.col ?? -Infinity));
+  const by = new Map<number, T[]>();
+  for (const it of items) {
+    const c = it.col ?? last;
+    if (!by.has(c)) by.set(c, []);
+    by.get(c)!.push(it);
+  }
+  return [...by.keys()].sort((a, b) => a - b).map((c) => by.get(c)!);
+}
+
+export const widthOf = (depth: number) => (depth === 0 ? 320 : depth === 1 ? 290 : 270);
 
 /**
  * 兄弟节点排序：有关系线相连的兄弟排在一起（沿关系链依次排开），
@@ -155,12 +169,14 @@ function orderByRelations(list: BoardNode[], adj: Map<string, Set<string>>): Boa
 /**
  * 思维导图布局：根在左，子节点在右侧纵向排开，父节点相对子树垂直居中。
  * 手动固定（pinned）的节点以自己的位置为起点单独排它的子树。
+ * 顶层按主题 / 分组上存的列号分列；都没有列号或 repack 时重新计算分列。
  */
 export function layoutTree(
   nodes: BoardNode[],
   sizes: Map<string, Size>,
   edges: BoardEdge[] = [],
   groupList: BoardGroup[] = [],
+  { repack = false }: { repack?: boolean } = {},
 ): Layout {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const groupById = new Map(groupList.map((g) => [g.id, g]));
@@ -376,8 +392,12 @@ export function layoutTree(
   //    列数让整体宽高比接近屏幕，避免很多棵树叠成一长条；分组当成一整块
   const origin = new Map<string, { x: number; y: number }>();
   const stack = [
-    ...roots.filter((r) => !groupOf(r) && !r.pinned).map((r) => ({ key: r.createdAt, root: r, group: undefined })),
-    ...groupList.filter((g) => !g.pinned).map((g) => ({ key: g.order, root: undefined, group: g })),
+    ...roots
+      .filter((r) => !groupOf(r) && !r.pinned)
+      .map((r) => ({ key: r.createdAt, id: r.id, col: r.col, root: r, group: undefined })),
+    ...groupList
+      .filter((g) => !g.pinned)
+      .map((g) => ({ key: g.order, id: groupKey(g.id), col: g.col, root: undefined, group: g })),
   ]
     .sort((a, b) => a.key - b.key)
     .map((item) => {
@@ -391,7 +411,15 @@ export function layoutTree(
     });
   // 顶层有手动固定的卡片或分组时只排一列：它们按绝对坐标摆放，分列会让别的树挪到它们身上
   const fixed = groupList.some((g) => g.pinned) || visible.some((id) => byId.get(id)!.pinned && !region.has(id));
-  const columns = packColumns(stack, fixed ? 1 : MAX_COLS);
+  const columns = fixed
+    ? stack.length
+      ? [stack]
+      : []
+    : !repack && stack.some((it) => it.col !== undefined)
+      ? storedColumns(stack)
+      : packColumns(stack, MAX_COLS);
+  const cols = new Map<string, number>();
+  if (!fixed) columns.forEach((col, i) => col.forEach((it) => cols.set(it.id, i)));
   let colStart = Math.min(0, ...(columns[0] ?? []).map((it) => it.lo));
   for (const col of columns) {
     const lo = Math.min(...col.map((it) => it.lo));
@@ -424,5 +452,5 @@ export function layoutTree(
     pos.set(id, { x: p.x + o.x, y: p.y + o.y });
   }
 
-  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region, side, mirror };
+  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region, side, mirror, cols };
 }

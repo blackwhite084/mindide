@@ -24,9 +24,9 @@ const MANUAL = new Set([
   "undo",
   "redo",
 ]);
-const LAYOUT_ONLY = ["x", "y", "pinned", "open", "fold"];
-/** 只改浏览状态，不算一步撤销 */
-const VIEW_ONLY = ["open", "fold"];
+const LAYOUT_ONLY = ["x", "y", "pinned", "open", "fold", "col"];
+/** 只改浏览状态（含自动定下的分列），不算一步撤销 */
+const VIEW_ONLY = ["open", "fold", "col"];
 
 /** 一块白板：内容、版本树、主对话 agent 和后台任务，彼此独立 */
 export class Workspace {

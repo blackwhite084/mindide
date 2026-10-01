@@ -74,6 +74,8 @@ export interface BoardNode {
   side?: NodeSide;
   /** 自定义标签：可以标记为任何东西（状态、类型、用户的偏好……），用于筛选和定位 */
   tags?: string[];
+  /** 顶层分列时在第几列（只对根节点有效）；AI 一轮结束时定下来，之后手动编辑不再重排 */
+  col?: number;
   lastEdit?: LastEdit;
   createdAt: number;
   updatedAt: number;
@@ -110,10 +112,12 @@ export interface BoardGroup {
   fold: boolean;
   /** 自动排列时的顺序键（和主题的 createdAt 比较） */
   order: number;
+  /** 顶层分列时在第几列，同 BoardNode.col */
+  col?: number;
   createdAt: number;
 }
 
-export type GroupPatch = Partial<Pick<BoardGroup, "title" | "x" | "y" | "pinned" | "fold">>;
+export type GroupPatch = Partial<Pick<BoardGroup, "title" | "x" | "y" | "pinned" | "fold" | "col">>;
 
 export interface ChatEntry {
   id: string;
@@ -214,7 +218,7 @@ export interface VersionMeta {
 }
 
 export type NodePatch = Partial<
-  Pick<BoardNode, "title" | "summary" | "md" | "x" | "y" | "pinned" | "open" | "fold" | "parentId" | "tags">
+  Pick<BoardNode, "title" | "summary" | "md" | "x" | "y" | "pinned" | "open" | "fold" | "parentId" | "tags" | "col">
 > & {
   /** auto：清除设置，跟随父级 */
   side?: NodeSide | "auto";
