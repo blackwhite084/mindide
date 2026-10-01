@@ -3,7 +3,15 @@ import type { BoardEdge } from "../../server/types.ts";
 import { LANE_BASE, LANE_STEP } from "./layout.ts";
 
 export type RelationFlowEdge = Edge<
-  { edge: BoardEdge; sourceTitle: string; targetTitle: string; lane?: number; state?: string },
+  {
+    edge: BoardEdge;
+    sourceTitle: string;
+    targetTitle: string;
+    lane?: number;
+    state?: string;
+    /** 连到子白板入口卡片、由里面的关系合并出来的线 */
+    agg?: boolean;
+  },
   "relation"
 >;
 
@@ -118,7 +126,7 @@ export function RelationEdge({ id, source, target, data, selected, markerEnd, ma
         markerStart={both ? markerStart : undefined}
         interactionWidth={16}
         // 行内样式：导出图片时才能保留线条颜色
-        style={{ stroke: "#8b93a3", strokeWidth: 1.4 }}
+        style={{ stroke: "#8b93a3", strokeWidth: 1.4, ...(data.agg ? { strokeDasharray: "5 4" } : {}) }}
       />
       <EdgeLabelRenderer>
         {edge.label && (

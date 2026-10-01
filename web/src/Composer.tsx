@@ -94,7 +94,7 @@ export function Composer({ state, selected, onClearSelection, chatVisible, onOpe
   const send = (mode: "queue" | "steer") => {
     const value = text.trim();
     if (!value) return;
-    client.send({ type: "chat", text: value, mode, contextNodeIds: selected });
+    client.send({ type: "chat", text: value, mode, contextNodeIds: selected, view: client.state.view });
     setText("");
     setHint(undefined);
     onClearSelection();

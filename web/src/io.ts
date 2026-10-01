@@ -2,7 +2,8 @@ import type { BoardEdge, BoardNode } from "../../server/types.ts";
 
 /** 导入导出用的精简结构（不含对话、布局状态） */
 export interface Fragment {
-  nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side">[];
+  nodes: (Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side"> &
+    Partial<Pick<BoardNode, "subboard" | "scope">>)[];
   edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[];
 }
 
@@ -13,7 +14,8 @@ export function toMarkdown(nodes: BoardNode[], edges: BoardEdge[]): string {
   const kids = new Map<string | null, BoardNode[]>();
   const ids = new Set(nodes.map((n) => n.id));
   for (const n of nodes) {
-    const p = n.parentId && ids.has(n.parentId) ? n.parentId : null;
+    // 子白板里的主题接在入口卡片下面
+    const p = n.parentId && ids.has(n.parentId) ? n.parentId : !n.parentId && n.scope && ids.has(n.scope) ? n.scope : null;
     if (!kids.has(p)) kids.set(p, []);
     kids.get(p)!.push(n);
   }
@@ -58,7 +60,18 @@ export function toJSON(nodes: BoardNode[], edges: BoardEdge[]): string {
     format: "ai-minder",
     version: 1,
     exportedAt: new Date().toISOString(),
-    nodes: nodes.map(({ id, title, summary, md, parentId, kind, tags, side }) => ({ id, title, summary, md, parentId, kind, ...(tags?.length ? { tags } : {}), ...(side ? { side } : {}) })),
+    nodes: nodes.map(({ id, title, summary, md, parentId, kind, tags, side, subboard, scope }) => ({
+      id,
+      title,
+      summary,
+      md,
+      parentId,
+      kind,
+      ...(tags?.length ? { tags } : {}),
+      ...(side ? { side } : {}),
+      ...(subboard ? { subboard } : {}),
+      ...(scope ? { scope } : {}),
+    })),
     edges: edges.map(({ source, target, dir, label, reverseLabel }) => ({ source, target, dir, label, reverseLabel })),
   };
   return JSON.stringify(data, null, 2);
@@ -177,6 +190,8 @@ export function fromJSON(text: string): Fragment {
         kind: n.kind === "task" || n.kind === "widget" ? n.kind : "note",
         ...(Array.isArray(n.tags) && n.tags.length ? { tags: n.tags.map(String) } : {}),
         ...(n.side === "left" || n.side === "right" || n.side === "bottom" ? { side: n.side } : {}),
+        ...(n.subboard ? { subboard: true } : {}),
+        ...(typeof n.scope === "string" && !n.parentId ? { scope: n.scope } : {}),
       })),
     edges: (src.edges ?? [])
       .filter((e: any) => e && e.source && e.target)

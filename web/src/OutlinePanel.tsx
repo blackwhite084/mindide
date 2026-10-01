@@ -14,7 +14,9 @@ function buildTree(nodes: Map<string, BoardNode>): Item[] {
   for (const n of nodes.values()) if (!n.draft) items.set(n.id, { node: n, children: [] });
   const roots: Item[] = [];
   for (const it of items.values()) {
-    const parent = it.node.parentId ? items.get(it.node.parentId) : undefined;
+    // 子白板里的主题挂在入口卡片下面
+    const n = it.node;
+    const parent = n.parentId ? items.get(n.parentId) : n.scope ? items.get(n.scope) : undefined;
     (parent ? parent.children : roots).push(it);
   }
   const byTime = (a: Item, b: Item) => a.node.createdAt - b.node.createdAt;
@@ -38,7 +40,10 @@ function Row({ item, depth, collapsed, toggle }: { item: Item; depth: number; co
         >
           {children.length ? (isOpen ? "▾" : "▸") : "•"}
         </span>
-        <span className="ol-title">{node.title || "未命名"}</span>
+        <span className="ol-title">
+          {node.subboard && <span className="ol-sub">▣ </span>}
+          {node.title || "未命名"}
+        </span>
       </div>
       {isOpen && children.map((c) => <Row key={c.node.id} item={c} depth={depth + 1} collapsed={collapsed} toggle={toggle} />)}
     </>

@@ -19,6 +19,7 @@ import type {
   VersionMeta,
 } from "../../server/types.ts";
 import { animator } from "./animator.ts";
+import { scopeOf } from "../../server/scope.ts";
 
 export interface ClientState {
   connected: boolean;
@@ -40,6 +41,8 @@ export interface ClientState {
   boards: BoardMeta[];
   board: string;
   skills: SkillInfo[];
+  /** 正在看的子白板（入口节点 id），null 为主白板；只在本地，按白板记住 */
+  view: string | null;
   /** 按标签筛选（只在本地）：不匹配的节点变淡 */
   tagFilter: string | null;
   models: ModelInfo[];
@@ -74,6 +77,7 @@ class Client {
     board: "",
     skills: [],
     tagFilter: null,
+    view: null,
     models: [],
     model: null,
     thinking: "low",
@@ -145,6 +149,7 @@ class Client {
         this.set({ sources: msg.sources });
         break;
       case "boards":
+        if (msg.current !== s.board) this.set({ view: loadView(msg.current) });
         this.set({ boards: msg.boards, board: msg.current });
         break;
       case "skills":
@@ -161,6 +166,7 @@ class Client {
         const isNew = !nodes.has(msg.node.id);
         nodes.set(msg.node.id, msg.node);
         this.set({ nodes });
+        if (msg.node.id === s.view) this.fixView();
         // 草稿节点出现时镜头顺带跟过去（已在视野内则不动）
         if (isNew && msg.node.draft) animator.focus?.(msg.node.id);
         if (isNew && msg.animate === "create") {
@@ -177,6 +183,7 @@ class Client {
         const nodes = new Map(s.nodes);
         nodes.delete(msg.id);
         this.set({ nodes });
+        if (msg.id === s.view) this.fixView();
         break;
       }
       case "edge:add": {
@@ -259,6 +266,25 @@ class Client {
       groups: new Map((board.groups ?? []).map((g) => [g.id, g])),
       chat: board.chat ?? [],
     });
+    this.fixView();
+  }
+
+  /** 进入子白板（null 回到主白板） */
+  setView(view: string | null) {
+    if (view && !this.state.nodes.get(view)?.subboard) view = null;
+    if (view === this.state.view) return;
+    try {
+      localStorage.setItem(`view:${this.state.board}`, view ?? "");
+    } catch {}
+    this.set({ view });
+  }
+
+  /** 正在看的子白板被解散或删除了：退到它所在的那一层 */
+  private fixView() {
+    const v = this.state.view;
+    if (!v || this.state.nodes.get(v)?.subboard) return;
+    const get = (id: string) => this.state.nodes.get(id);
+    this.setView(get(v) ? (scopeOf(get, v) ?? null) : null);
   }
 
   /** 本地立即更新并同步给服务端（避免拖动、折叠等操作等待往返） */
@@ -292,7 +318,7 @@ class Client {
   createGroup(nodeIds: string[], pos?: { x: number; y: number }) {
     const id = Math.random().toString(36).slice(2, 10);
     this.editRequest = `group:${id}`;
-    this.send({ type: "group:create", id, title: "新分组", nodeIds, ...(pos ?? {}) });
+    this.send({ type: "group:create", id, title: "新分组", nodeIds, scope: this.state.view, ...(pos ?? {}) });
     return id;
   }
 
@@ -319,12 +345,28 @@ class Client {
   createNode(parentId: string | null, pos?: { x: number; y: number }, groupId?: string) {
     const id = Math.random().toString(36).slice(2, 10);
     this.editRequest = id;
-    this.send({ type: "node:create", id, parentId, groupId, ...(pos ?? {}) });
+    this.send({ type: "node:create", id, parentId, groupId, scope: this.state.view, ...(pos ?? {}) });
+    return id;
+  }
+
+  /** 把节点收进新的子白板，新建后直接进入改名 */
+  createSubboard(nodeIds: string[], title: string) {
+    const id = Math.random().toString(36).slice(2, 10);
+    this.editRequest = id;
+    this.send({ type: "subboard:create", id, title, nodeIds });
     return id;
   }
 }
 
 export const client = new Client();
+
+function loadView(board: string): string | null {
+  try {
+    return localStorage.getItem(`view:${board}`) || null;
+  } catch {
+    return null;
+  }
+}
 
 /** 节点摘要：优先用 summary，没有则取正文第一行 */
 export function summaryOf(n: BoardNode) {

@@ -714,3 +714,35 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 
 .react-flow__handle.handle-aux { opacity: 0 !important; pointer-events: none; }
 .mdnode.mirror .fold-btn { right: auto; left: -11px; }
+
+/* ---------- 子白板 ---------- */
+.canvas-top { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.canvas-top .tag-bar { margin: 0; }
+.crumbs {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap; max-width: 60vw;
+  padding: 4px 8px; border-radius: 9px; background: var(--panel); border: 1px solid var(--line-2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); font-size: 13px;
+}
+.crumb { background: transparent; border: none; padding: 2px 6px; border-radius: 6px; color: var(--muted); }
+button.crumb:hover { color: var(--text); background: var(--node-2); }
+.crumb.cur { color: var(--text); font-weight: 600; }
+.crumb-sep { color: var(--muted); opacity: 0.6; }
+.crumb-hint { margin-left: 6px; font-size: 11px; color: var(--muted); opacity: 0.7; }
+.sub-empty { padding: 6px 12px; border-radius: 9px; background: var(--panel); border: 1px dashed var(--line-2); color: var(--muted); font-size: 12.5px; }
+.mdnode.subboard {
+  box-shadow: 5px 5px 0 -1px var(--node), 5px 5px 0 0 var(--line-2), 10px 10px 0 -1px var(--node), 10px 10px 0 0 var(--line), 0 3px 14px rgba(0, 0, 0, 0.22);
+}
+.mdnode.subboard.selected {
+  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.35), 5px 5px 0 -1px var(--node), 5px 5px 0 0 var(--line-2), 10px 10px 0 -1px var(--node), 10px 10px 0 0 var(--line);
+}
+.mdnode-head .kind.sub { color: var(--accent); background: rgba(122, 162, 247, 0.14); }
+.sub-entry {
+  display: flex; align-items: baseline; gap: 6px; width: calc(100% - 20px); margin: 0 10px 10px; padding: 6px 9px;
+  border-radius: 7px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+  background: rgba(122, 162, 247, 0.07); color: var(--muted); font-size: 12px; text-align: left;
+}
+.sub-entry:hover { background: rgba(122, 162, 247, 0.16); color: var(--text); }
+.sub-count { flex: none; color: var(--accent); }
+.sub-topics { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-go { flex: none; margin-left: auto; color: var(--accent); }
+.badge.ext { color: var(--muted); }

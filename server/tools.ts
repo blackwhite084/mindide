@@ -10,6 +10,8 @@ export interface ToolContext {
   by: string;
   /** 新建节点未指定 parentId 时的默认父节点（通常是用户选中的节点） */
   defaultParent: () => string | null;
+  /** 用户所在的子白板（undefined 为主白板）：没有选中节点时新主题放在这里 */
+  view?: () => string | undefined;
   dispatch?: (title: string, instructions: string, contextNodeIds: string[]) => string;
   /** 领取流式生成时预先放上白板的草稿节点 */
   claimDraft?: (toolCallId: string) => string | undefined;
@@ -49,11 +51,18 @@ function parentOf(ctx: ToolContext, parentId: string | null | undefined) {
   return must(ctx, parentId).id;
 }
 
-/** 新主题默认放进用户选中节点所在的分组 */
-function topicGroup(ctx: ToolContext, parent: string | null) {
-  if (parent) return undefined;
+/** 新主题默认放进用户选中节点所在的分组和白板；没有选中时放在用户所在的白板 */
+function topicPlace(ctx: ToolContext, parent: string | null) {
+  if (parent) return {};
   const focus = ctx.defaultParent();
-  return focus ? ctx.store.groupOf(focus) : undefined;
+  return focus ? { groupId: ctx.store.groupOf(focus), scope: ctx.store.scopeOf(focus) } : { scope: ctx.view?.() };
+}
+
+/** 子白板的入口卡片 */
+function mustBoard(ctx: ToolContext, id: string) {
+  const node = must(ctx, id);
+  if (!node.subboard) throw new Error(`节点 ${id} 不是子白板`);
+  return node;
 }
 
 function mustGroup(ctx: ToolContext, id: string) {
@@ -111,7 +120,7 @@ export function createCanvasTools(ctx: ToolContext) {
     name: "canvas_list",
     label: "查看白板",
     description:
-      "查看整棵思维树：每个节点的 id、标题、摘要和标签，缩进表示层级；有分组时按分组分段。传 tag 时只列出带该标签的节点（平铺）。",
+      "查看整棵思维树：每个节点的 id、标题、摘要和标签，缩进表示层级；有分组时按分组分段，有子白板时每个子白板单独一段。传 tag 时只列出带该标签的节点（平铺）。",
     parameters: Type.Object({ tag: Type.Optional(Type.String({ description: "只看带这个标签的节点，如 todo" })) }),
     execute: async (_id, { tag }) => result(ctx.store.outline(400, tag)),
   });
@@ -159,7 +168,7 @@ export function createCanvasTools(ctx: ToolContext) {
         ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false, ...(tags ? { tags } : {}), ...(side ? { side } : {}) });
         return result(`已创建节点 ${draftId}`, draftId);
       }
-      const node = ctx.store.createNode({ title, summary, md, parentId: parent, groupId: topicGroup(ctx, parent), tags, side }, true);
+      const node = ctx.store.createNode({ title, summary, md, parentId: parent, ...topicPlace(ctx, parent), tags, side }, true);
       return result(`已创建节点 ${node.id}`, node.id);
     },
   });
@@ -184,7 +193,7 @@ export function createCanvasTools(ctx: ToolContext) {
       if (draftId) {
         ctx.store.updateNode(draftId, { ...init, draft: false });
         id = draftId;
-      } else id = ctx.store.createNode({ ...init, groupId: topicGroup(ctx, parent) }, true).id;
+      } else id = ctx.store.createNode({ ...init, ...topicPlace(ctx, parent) }, true).id;
       return result(`已创建组件 ${id}，${await widgetReport(ctx, id)}`, id);
     },
   });
@@ -248,6 +257,9 @@ export function createCanvasTools(ctx: ToolContext) {
       const target = parentOf(ctx, parentId);
       if (target && (target === node.id || ctx.store.isDescendant(target, node.id))) {
         throw new Error("不能挂到自己的子孙节点下");
+      }
+      if (target && ctx.store.scopeOf(target) !== ctx.store.scopeOf(node.id) && ctx.store.isInside(target, node.id)) {
+        throw new Error("不能挂进自己这个子白板里面");
       }
       ctx.store.updateNode(node.id, { parentId: target, ...(side ? { side } : {}) });
       return result(`已移动节点 ${node.id}`, node.id);
@@ -317,7 +329,7 @@ export function createCanvasTools(ctx: ToolContext) {
       const nodeIds = (ids ?? []).map((id) => must(ctx, id).id);
       if (!groupId) {
         if (!title) throw new Error("新建分组需要 title");
-        const g = ctx.store.createGroup({ title, nodeIds });
+        const g = ctx.store.createGroup({ title, nodeIds, scope: ctx.view?.() });
         if (fold) ctx.store.updateGroup(g.id, { fold });
         return result(`已创建分组 ${g.id}`);
       }
@@ -347,7 +359,59 @@ export function createCanvasTools(ctx: ToolContext) {
     },
   });
 
-  const tools = [list, read, create, createWidget, edit, move, del, link, unlink, group, ungroup, askUser()];
+  const subboard = defineTool({
+    name: "canvas_subboard",
+    label: "子白板",
+    description:
+      "子白板是白板上的一张入口卡片，点进去是一块独立的画布（可以有多个主题和分组），用来把一大块内容移出当前画面、减少杂乱。" +
+      "用法：只传 id —— 把这个节点转为子白板，它的子节点成为子白板里的主题（适合展开得太大的分支）；" +
+      "传 ids + title —— 新建子白板，入口卡片放在这些节点原来的位置，节点连同子树收进去；" +
+      "传 ids + boardId —— 把节点（连同子树）移进已有的子白板，boardId 传 main 表示移回主白板；" +
+      "传 boardId + dissolve —— 解散子白板，里面的分组移到上一层、其余主题挂回入口卡片下。" +
+      "跨白板的关系线会保留。",
+    parameters: Type.Object({
+      id: Type.Optional(Type.String({ description: "要转为子白板的节点 id" })),
+      ids: Type.Optional(Type.Array(Type.String(), { description: "要收进子白板的节点 id" })),
+      title: Type.Optional(Type.String({ description: "新子白板的标题，≤ 16 字" })),
+      boardId: Type.Optional(Type.String({ description: "已有子白板（入口卡片）的 id，或 main" })),
+      dissolve: Type.Optional(Type.Boolean({ description: "解散 boardId 这个子白板" })),
+    }),
+    execute: async (_id, { id, ids, title, boardId, dissolve }) => {
+      if (dissolve) {
+        if (!boardId) throw new Error("解散需要 boardId");
+        const b = mustBoard(ctx, boardId);
+        ctx.store.dissolveSubboard(b.id);
+        return result(`已解散子白板「${b.title}」`, b.id);
+      }
+      const nodeIds = (ids ?? []).map((i) => must(ctx, i).id);
+      if (nodeIds.length && boardId) {
+        const scope = boardId === "main" || boardId === "root" ? undefined : mustBoard(ctx, boardId).id;
+        for (const nid of nodeIds) {
+          if (scope && (nid === scope || ctx.store.isInside(scope, nid) || ctx.store.isDescendant(scope, nid))) {
+            throw new Error(`不能把 ${nid} 移进它自己里面的子白板`);
+          }
+          ctx.store.moveToScope(nid, scope);
+        }
+        return result(`已移动 ${nodeIds.length} 个节点到${scope ? `子白板 ${scope}` : "主白板"}`, scope);
+      }
+      if (nodeIds.length) {
+        if (!title) throw new Error("新建子白板需要 title");
+        const entry = ctx.store.createSubboard({ title, nodeIds });
+        if (!entry) throw new Error("没有可以收进去的节点");
+        return result(`已创建子白板 ${entry.id}，收进 ${nodeIds.length} 个节点`, entry.id);
+      }
+      if (id) {
+        const node = must(ctx, id);
+        if (node.subboard) throw new Error("它已经是子白板");
+        ctx.store.convertToSubboard(node.id);
+        if (title && title !== node.title) ctx.store.updateNode(node.id, { title });
+        return result(`已把「${node.title}」转为子白板`, node.id);
+      }
+      throw new Error("需要 id、ids 或 boardId");
+    },
+  });
+
+  const tools = [list, read, create, createWidget, edit, move, del, link, unlink, group, ungroup, subboard, askUser()];
 
   if (ctx.dispatch) {
     const dispatch = ctx.dispatch;

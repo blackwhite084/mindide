@@ -60,9 +60,11 @@ export function SearchPalette({ state }: { state: ClientState }) {
 
   const pathOf = (id: string) => {
     const parts: string[] = [];
-    for (let n = state.nodes.get(id); n?.parentId; ) {
-      n = state.nodes.get(n.parentId);
-      if (n) parts.unshift(n.title || "未命名");
+    // 一路向上：父节点，主题则是所在子白板的入口卡片
+    for (let n = state.nodes.get(id), i = 0; n && i < 200; i++) {
+      const up = n.parentId ? state.nodes.get(n.parentId) : n.scope ? state.nodes.get(n.scope) : undefined;
+      if (up) parts.unshift((up.subboard && !n.parentId ? "▣ " : "") + (up.title || "未命名"));
+      n = up;
     }
     return parts.join(" › ");
   };

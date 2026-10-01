@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Panel } from "@xyflow/react";
 import { client, type ClientState } from "./client.ts";
 import { ui } from "./ui.ts";
 
@@ -23,7 +22,7 @@ export function TagBar({ state }: { state: ClientState }) {
   const all = counts(state);
   if (!all.length) return null;
   return (
-    <Panel position="top-left" className="tag-bar">
+    <div className="tag-bar">
       {all.map(([t, c]) => (
         <button
           key={t}
@@ -39,7 +38,7 @@ export function TagBar({ state }: { state: ClientState }) {
           清除筛选
         </button>
       )}
-    </Panel>
+    </div>
   );
 }
 

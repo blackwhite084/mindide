@@ -19,6 +19,8 @@ export class DraftTracker {
   constructor(
     private store: BoardStore,
     private defaultParent: () => string | null,
+    /** 用户所在的子白板：没有默认父节点时新主题放在这里 */
+    private view?: () => string | undefined,
   ) {}
 
   /** 处理流式中的工具调用（partial.content 里的 toolCall） */
@@ -78,11 +80,15 @@ export class DraftTracker {
     this.drafts.clear();
   }
 
-  /** 省略 parentId 时挂在默认父节点下；新主题放进默认父节点所在的分组 */
+  /** 省略 parentId 时挂在默认父节点下；新主题放进默认父节点所在的分组和白板（没有则是用户所在的白板） */
   private placement(parentId: string | null | undefined) {
     const fallback = this.defaultParent();
-    if (parentId === undefined) return { parentId: fallback };
-    if (parentId === null && fallback) return { parentId, groupId: this.store.groupOf(fallback) };
+    if (parentId === undefined && fallback) return { parentId: fallback };
+    if (parentId == null) {
+      return fallback
+        ? { parentId: null, groupId: this.store.groupOf(fallback), scope: this.store.scopeOf(fallback) }
+        : { parentId: null, scope: this.view?.() };
+    }
     return { parentId };
   }
 

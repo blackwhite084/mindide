@@ -28,6 +28,11 @@ export type MdFlowNode = Node<
     /** 版本对比：相对历史版本新增 / 有改动 */
     diff?: "added" | "modified";
     beforeText?: string;
+    /** 子白板入口：里面的卡片数、主题标题 */
+    subCards?: number;
+    subTopics?: string;
+    /** 和不在这一层白板上的节点之间的关系（对方的 id，逗号分隔） */
+    external?: string;
   },
   "md"
 >;
@@ -85,7 +90,7 @@ function useFollowActive(ref: React.RefObject<HTMLDivElement | null>, frame: Fra
 }
 
 function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
-  const { node, depth, color, childCount, detail, dropTarget, pending, mirror, dim, related, diff, beforeText } = data;
+  const { node, depth, color, childCount, detail, dropTarget, pending, mirror, dim, related, diff, beforeText, subCards, subTopics, external } = data;
   const mdFrame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id, "md"));
   const sumFrame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id, "summary"));
   const frame = mdFrame ?? sumFrame;
@@ -142,9 +147,10 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
     });
   }, [node.id]);
 
-  // 双击：展开/收起正文（编辑在右键菜单里，修改优先交给 AI）
+  // 双击：展开/收起正文（编辑在右键菜单里，修改优先交给 AI）；子白板则是进入
   const toggleOpen = () => {
     if (editing || node.draft) return;
+    if (node.subboard) return client.setView(node.id);
     if (detail === "summary" && node.md.trim()) client.patchNode(node.id, { open: !node.open });
   };
 
@@ -259,6 +265,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         open && "open",
         dropTarget && "drop-target",
         node.draft && "draft",
+        node.subboard && "subboard",
         dim && !frame && "dim",
         diff && `diff-${diff}`,
         related && "related",
@@ -302,6 +309,7 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
         <>
           <div className="mdnode-head" onDoubleClick={toggleOpen}>
             {node.kind === "task" && <span className="kind">报告</span>}
+            {node.subboard && <span className="kind sub">子白板</span>}
             {widget && <span className="kind widget">组件</span>}
             {node.draft && <span className="kind drafting">AI 正在写</span>}
             {pending && !frame && !node.draft && <span className="kind drafting">AI 准备修改</span>}
@@ -313,6 +321,29 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
                 onClick={() => client.patchNode(node.id, { pinned: false })}
               >
                 ⌖
+              </button>
+            )}
+            {external && (
+              <button
+                className="badge ext nodrag"
+                title="和其他白板上的卡片有关系，点击跳过去"
+                onClick={(e) => {
+                  const ids = external.split(",");
+                  if (ids.length === 1) return ui.focusNode(ids[0]);
+                  ui.openMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    items: [
+                      { title: "其他白板上的相关卡片" },
+                      ...[...new Set(ids)].map((id) => {
+                        const n = client.state.nodes.get(id);
+                        return { label: n?.title || "未命名", onClick: () => ui.focusNode(id) };
+                      }),
+                    ],
+                  });
+                }}
+              >
+                ↗ {external.split(",").length}
               </button>
             )}
             {diff === "added" && <span className="kind diff-tag added">新增</span>}
@@ -357,6 +388,13 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
             {body}
           </div>
         </>
+      )}
+      {!editing && node.subboard && (
+        <button className="sub-entry nodrag" title="进入子白板（也可以双击卡片）" onClick={() => client.setView(node.id)}>
+          <span className="sub-count">{subCards ?? 0} 张卡片</span>
+          {subTopics && <span className="sub-topics">{subTopics}</span>}
+          <span className="sub-go">进入 →</span>
+        </button>
       )}
       {!editing && !!node.tags?.length && (
         <div className="tag-chips nodrag">

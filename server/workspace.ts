@@ -21,6 +21,10 @@ const MANUAL = new Set([
   "group:update",
   "group:delete",
   "node:toGroup",
+  "node:toScope",
+  "subboard:create",
+  "subboard:convert",
+  "subboard:dissolve",
   "undo",
   "redo",
 ]);
@@ -167,7 +171,7 @@ export class Workspace {
     }
     switch (msg.type) {
       case "chat":
-        if (msg.text.trim()) main.chat(msg.text.trim(), msg.mode, msg.contextNodeIds);
+        if (msg.text.trim()) main.chat(msg.text.trim(), msg.mode, msg.contextNodeIds, msg.view ?? undefined);
         break;
       case "abort":
         main.abort();
@@ -207,6 +211,7 @@ export class Workspace {
           id: msg.id,
           parentId: msg.parentId,
           groupId: msg.groupId,
+          scope: msg.scope ?? undefined,
           open: true,
           ...(msg.x !== undefined && msg.y !== undefined ? { x: msg.x, y: msg.y, pinned: true } : {}),
         });
@@ -237,6 +242,7 @@ export class Workspace {
           title: msg.title,
           nodeIds: msg.nodeIds,
           pos: msg.x !== undefined && msg.y !== undefined ? { x: msg.x, y: msg.y } : undefined,
+          scope: msg.scope ?? undefined,
         });
         break;
       case "group:update":
@@ -247,6 +253,18 @@ export class Workspace {
         break;
       case "node:toGroup":
         store.moveToGroup(msg.id, msg.groupId, msg.x !== undefined && msg.y !== undefined ? { x: msg.x, y: msg.y } : undefined);
+        break;
+      case "node:toScope":
+        store.moveToScope(msg.id, msg.scope ?? undefined);
+        break;
+      case "subboard:create":
+        store.createSubboard({ id: msg.id, title: msg.title, nodeIds: msg.nodeIds });
+        break;
+      case "subboard:convert":
+        store.convertToSubboard(msg.id);
+        break;
+      case "subboard:dissolve":
+        store.dissolveSubboard(msg.id);
         break;
       case "task:create":
         tasks.run("", msg.instructions, msg.contextNodeIds);

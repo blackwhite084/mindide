@@ -68,6 +68,10 @@ export interface BoardNode {
   fold: boolean;
   /** 所在分组，只写在根节点（主题）上；子节点跟随所在主题 */
   groupId?: string;
+  /** 子白板的入口卡片：点进去是一块独立的画布，里面的主题和分组的 scope 指向它 */
+  subboard?: boolean;
+  /** 主题所在的子白板（入口节点 id），只写在根节点上；没有则在主白板。在分组里时与分组的 scope 一致 */
+  scope?: string;
   /** 模型仍在生成中的草稿节点 */
   draft?: boolean;
   /** 布局提示：放在父节点的哪一边（只对有父节点的节点有效） */
@@ -114,6 +118,8 @@ export interface BoardGroup {
   order: number;
   /** 顶层分列时在第几列，同 BoardNode.col */
   col?: number;
+  /** 所在的子白板（入口节点 id）；没有则在主白板 */
+  scope?: string;
   createdAt: number;
 }
 
@@ -257,7 +263,8 @@ export type ServerMsg =
 
 // ---------- 客户端 → 服务端 ----------
 export type ClientMsg =
-  | { type: "chat"; text: string; mode: "queue" | "steer"; contextNodeIds: string[] }
+  /** view：用户当前所在的子白板（null 为主白板） */
+  | { type: "chat"; text: string; mode: "queue" | "steer"; contextNodeIds: string[]; view?: string | null }
   | { type: "abort" }
   | { type: "queue:clear" }
   /** 回答 ask_user 的提问（id 是工具调用 id）；answers 为 null 表示跳过 */
@@ -267,7 +274,8 @@ export type ClientMsg =
   | { type: "chat:open"; id: string }
   | { type: "chat:delete"; id: string }
   | { type: "node:update"; id: string; patch: NodePatch }
-  | { type: "node:create"; id: string; parentId: string | null; x?: number; y?: number; groupId?: string }
+  /** scope：新主题所在的子白板（有 groupId 时跟随分组） */
+  | { type: "node:create"; id: string; parentId: string | null; x?: number; y?: number; groupId?: string; scope?: string | null }
   | { type: "node:delete"; id: string }
   | { type: "node:revert"; id: string }
   | { type: "edge:add"; source: string; target: string }
@@ -275,12 +283,20 @@ export type ClientMsg =
   | { type: "edge:reverse"; id: string }
   | { type: "edge:delete"; id: string }
   /** 把节点打包成新分组；x/y 给出时分组固定在那里 */
-  | { type: "group:create"; id: string; title: string; nodeIds: string[]; x?: number; y?: number }
+  | { type: "group:create"; id: string; title: string; nodeIds: string[]; x?: number; y?: number; scope?: string | null }
   | { type: "group:update"; id: string; patch: GroupPatch }
   /** withContent：连里面的卡片一起删除；否则解散（卡片变成未分组的主题） */
   | { type: "group:delete"; id: string; withContent: boolean }
   /** 把节点（连同子树）移到某个分组（null 为不分组）；非主题会从原树上断开 */
   | { type: "node:toGroup"; id: string; groupId: string | null; x?: number; y?: number }
+  /** 新建子白板：入口卡片放在这些节点原来的位置，节点（连同子树）成为里面的主题 */
+  | { type: "subboard:create"; id: string; title: string; nodeIds: string[] }
+  /** 把节点转为子白板：它的子节点成为里面的主题 */
+  | { type: "subboard:convert"; id: string }
+  /** 解散子白板：里面未分组的主题挂回入口卡片下，分组移到上一层 */
+  | { type: "subboard:dissolve"; id: string }
+  /** 把节点（连同子树）作为主题移到某个子白板（null 为主白板）；非主题会从原树上断开 */
+  | { type: "node:toScope"; id: string; scope: string | null }
   | { type: "task:create"; instructions: string; contextNodeIds: string[] }
   | { type: "task:steer"; id: string; text: string }
   | { type: "task:abort"; id: string }
@@ -290,7 +306,8 @@ export type ClientMsg =
       mode: "replace" | "merge";
       name: string;
       parentId?: string | null;
-      nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side">[];
+      nodes: (Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side"> &
+        Partial<Pick<BoardNode, "subboard" | "scope">>)[];
       edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[];
     }
   | { type: "version:checkout"; id: string }

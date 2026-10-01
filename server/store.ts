@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { nanoid } from "nanoid";
 import type { AskAnswer, Board, BoardEdge, BoardGroup, BoardNode, ChatEntry, EdgePatch, EditField, GroupPatch, ServerMsg, Task } from "./types.ts";
 import { codeHash } from "./widget.ts";
+import { scopeOf, scopePath } from "./scope.ts";
 
 type Listener = (msg: ServerMsg) => void;
 
@@ -86,6 +87,34 @@ export class BoardStore {
     return this.rootOf(id)?.groupId;
   }
 
+  /** 节点所在的白板：子白板入口的 id，undefined 为主白板 */
+  scopeOf(id: string) {
+    return scopeOf(this.getFn, id);
+  }
+
+  private getFn = (id: string) => this.get(id);
+
+  /** 节点是否在子白板 entry 里（含更深层） */
+  isInside(id: string, entry: string) {
+    return scopePath(this.getFn, this.scopeOf(id)).includes(entry);
+  }
+
+  /** 把 id（连同子树）放进 scope 会不会形成环：scope 本身在这棵子树里的某个子白板中 */
+  private wouldNest(id: string, scope: string | undefined) {
+    return scopePath(this.getFn, scope).some((s) => s === id || this.isDescendant(s, id));
+  }
+
+  /** 主题的 scope：在分组里时跟随分组；子节点不记 scope */
+  private fixScope(node: BoardNode) {
+    if (node.parentId) delete node.scope;
+    else if (node.groupId) {
+      const s = this.getGroup(node.groupId)?.scope;
+      if (s) node.scope = s;
+      else delete node.scope;
+    } else if (node.scope && (!this.get(node.scope)?.subboard || this.wouldNest(node.id, node.scope))) delete node.scope;
+    if (!node.scope) delete node.scope;
+  }
+
   isDescendant(id: string, ancestorId: string): boolean {
     for (let n = this.get(id); n?.parentId; n = this.get(n.parentId)) {
       if (n.parentId === ancestorId) return true;
@@ -134,6 +163,7 @@ export class BoardStore {
     }
     if (node.parentId && !this.get(node.parentId)) node.parentId = null;
     if (node.parentId || (node.groupId && !this.getGroup(node.groupId))) delete node.groupId;
+    this.fixScope(node);
     this.board.nodes.push(node);
     this.emit({ type: "node:upsert", node, animate: animate ? "create" : undefined });
     return node;
@@ -144,20 +174,32 @@ export class BoardStore {
     if (!node) return;
     if (patch.parentId !== undefined && patch.parentId !== null) {
       // 不能挂到自己或自己的子孙下面
-      if (patch.parentId === id || this.isDescendant(patch.parentId, id) || !this.get(patch.parentId)) {
+      // 也不能挂进自己（或子孙）这个子白板里面
+      if (
+        patch.parentId === id ||
+        this.isDescendant(patch.parentId, id) ||
+        !this.get(patch.parentId) ||
+        this.wouldNest(id, this.scopeOf(patch.parentId))
+      ) {
         delete patch.parentId;
       }
     }
     if (patch.tags) patch.tags = normalizeTags(patch.tags);
     const groupBefore = this.groupOf(id);
-    // 主题从树上断开时留在原来的分组；挂到别的节点下则跟随新的主题
-    if (patch.parentId === null && node.parentId && !("groupId" in patch)) patch.groupId = groupBefore;
+    const scopeBefore = this.scopeOf(id);
+    // 主题从树上断开时留在原来的分组和白板；挂到别的节点下则跟随新的主题
+    if (patch.parentId === null && node.parentId) {
+      if (!("groupId" in patch)) patch.groupId = groupBefore;
+      if (!("scope" in patch)) patch.scope = scopeBefore;
+    }
     Object.assign(node, patch, { updatedAt: Date.now() });
     if (!isSide(node.side)) delete node.side;
     if (node.tags && !node.tags.length) delete node.tags;
+    if (!node.subboard) delete node.subboard;
     if (node.parentId || !node.groupId || !this.getGroup(node.groupId)) delete node.groupId;
-    // 换了分组：原来固定的位置是相对旧分组的，不再有意义
-    if (this.groupOf(id) !== groupBefore) {
+    this.fixScope(node);
+    // 换了分组或白板：原来固定的位置是相对旧位置的，不再有意义
+    if (this.groupOf(id) !== groupBefore || this.scopeOf(id) !== scopeBefore) {
       if (patch.x === undefined) node.pinned = false;
       this.unpinDescendants(id);
     }
@@ -192,6 +234,8 @@ export class BoardStore {
   deleteNode(id: string) {
     const node = this.get(id);
     if (!node) return;
+    // 子白板的入口：里面的内容先放回这一层
+    if (node.subboard) this.dissolveSubboard(id);
     for (const c of this.children(id)) this.updateNode(c.id, { parentId: node.parentId });
     this.board.nodes = this.board.nodes.filter((n) => n.id !== id);
     const removed = this.board.edges.filter((e) => e.source === id || e.target === id);
@@ -211,8 +255,10 @@ export class BoardStore {
   }
 
   /** 新建分组并装入节点；pos 给出时分组固定在那里，否则参与自动排列 */
-  createGroup(init: { id?: string; title: string; nodeIds?: string[]; pos?: { x: number; y: number } }): BoardGroup {
+  createGroup(init: { id?: string; title: string; nodeIds?: string[]; pos?: { x: number; y: number }; scope?: string }): BoardGroup {
     const ids = this.topMost(init.nodeIds ?? []);
+    // 分组建在成员所在的白板上；空分组建在指定的白板上
+    const scope = ids.length ? this.scopeOf(ids[0]) : init.scope && this.get(init.scope)?.subboard ? init.scope : undefined;
     // 自动排列时放在成员原来所在主题的位置上，而不是排到最后
     const orders = ids.map((id) => this.rootOf(id)!.createdAt);
     const now = Date.now();
@@ -224,6 +270,7 @@ export class BoardStore {
       pinned: !!init.pos,
       fold: false,
       order: orders.length ? Math.min(...orders) - 0.5 : now,
+      ...(scope ? { scope } : {}),
       createdAt: now,
     };
     this.board.groups.push(group);
@@ -245,6 +292,14 @@ export class BoardStore {
     if (!this.getGroup(id)) return;
     if (withContent) {
       const ids = new Set(this.board.nodes.filter((n) => this.groupOf(n.id) === id).map((n) => n.id));
+      // 分组里的子白板连同里面的内容一起删
+      for (const n of this.board.nodes) {
+        if (scopePath(this.getFn, this.scopeOf(n.id)).some((s) => ids.has(s))) ids.add(n.id);
+      }
+      for (const g of this.board.groups.filter((g) => g.scope && ids.has(g.scope))) {
+        this.board.groups = this.board.groups.filter((x) => x.id !== g.id);
+        this.emit({ type: "group:delete", id: g.id });
+      }
       const removed = this.board.edges.filter((e) => ids.has(e.source) || ids.has(e.target));
       this.board.nodes = this.board.nodes.filter((n) => !ids.has(n.id));
       this.board.edges = this.board.edges.filter((e) => !ids.has(e.source) && !ids.has(e.target));
@@ -272,6 +327,79 @@ export class BoardStore {
     });
     if (oldParent && this.groupOf(oldParent) !== (groupId ?? undefined)) this.addEdge(id, oldParent, { label: "来自" });
     return node;
+  }
+
+  // ---------- 子白板 ----------
+
+  /**
+   * 把节点（连同子树）作为主题移到某个白板（undefined 为主白板）。
+   * 非主题会从原树上断开；link 时留一条关系线指回原来的父节点。
+   */
+  moveToScope(id: string, scope: string | undefined, link = true) {
+    const node = this.get(id);
+    if (!node) return;
+    if (scope && (!this.get(scope)?.subboard || this.wouldNest(id, scope))) return;
+    const oldParent = node.parentId;
+    this.updateNode(id, { parentId: null, groupId: undefined, scope, pinned: false });
+    if (link && oldParent && this.scopeOf(oldParent) !== scope) this.addEdge(id, oldParent, { label: "来自" });
+    return node;
+  }
+
+  /** 新建子白板：入口卡片放在这些节点原来的位置（同一个父节点下则挂在它下面），节点成为里面的主题 */
+  createSubboard(init: { id?: string; title: string; nodeIds: string[] }) {
+    const nodes = this.topMost(init.nodeIds).map((id) => this.get(id)!);
+    if (!nodes.length) return;
+    const first = nodes[0];
+    const parentId = nodes.every((n) => n.parentId === first.parentId) ? first.parentId : null;
+    const entry = this.createNode({
+      ...(init.id && !this.get(init.id) ? { id: init.id } : {}),
+      title: init.title,
+      subboard: true,
+      parentId,
+      ...(parentId ? {} : { groupId: this.groupOf(first.id), scope: this.scopeOf(first.id) }),
+      // 排在这些节点原来的位置
+      createdAt: Math.min(...nodes.map((n) => n.createdAt)) - 0.5,
+    });
+    for (const n of nodes) this.moveToScope(n.id, entry.id, n.parentId !== parentId);
+    return entry;
+  }
+
+  /** 把节点转为子白板：它的子节点成为里面的主题 */
+  convertToSubboard(id: string) {
+    const node = this.get(id);
+    if (!node || node.subboard) return;
+    this.updateNode(id, { subboard: true, fold: false });
+    for (const c of this.children(id)) this.updateNode(c.id, { parentId: null, groupId: undefined, scope: id, pinned: false });
+    return node;
+  }
+
+  /** 解散子白板：里面的分组移到上一层，未分组的主题挂回入口卡片下（转为子白板的逆操作） */
+  dissolveSubboard(id: string) {
+    const node = this.get(id);
+    if (!node?.subboard) return;
+    const outer = this.scopeOf(id);
+    for (const g of this.board.groups.filter((g) => g.scope === id)) {
+      if (outer) g.scope = outer;
+      else delete g.scope;
+      g.pinned = false;
+      this.emit({ type: "group:upsert", group: g });
+    }
+    for (const n of this.board.nodes.filter((n) => !n.parentId && n.scope === id)) {
+      if (n.groupId) this.updateNode(n.id, {});
+      else this.updateNode(n.id, { parentId: id, pinned: false });
+    }
+    this.updateNode(id, { subboard: undefined });
+    return node;
+  }
+
+  /** 子白板里（含更深层）的卡片数 */
+  subboardSize(id: string) {
+    return this.board.nodes.filter((n) => this.isInside(n.id, id)).length;
+  }
+
+  /** 白板的路径名，例如「主白板 › 调研 › 竞品」 */
+  scopeName(scope: string | undefined) {
+    return ["主白板", ...scopePath(this.getFn, scope).map((s) => this.get(s)?.title || "未命名")].join(" › ");
   }
 
   /** 去掉祖先也在列表里的节点 */
@@ -364,7 +492,7 @@ export class BoardStore {
   /** 导入一组节点和关系；merge 时重新分配 id，避免和现有节点冲突 */
   importNodes(
     mode: "replace" | "merge",
-    nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side">[],
+    nodes: (Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags" | "side"> & Partial<Pick<BoardNode, "subboard" | "scope">>)[],
     edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[],
     parentId: string | null = null,
   ) {
@@ -379,7 +507,15 @@ export class BoardStore {
       md: n.md ?? "",
       ...(isSide(n.side) ? { side: n.side } : {}),
       ...(Array.isArray(n.tags) && normalizeTags(n.tags).length ? { tags: normalizeTags(n.tags) } : {}),
-      parentId: n.parentId && idMap.has(n.parentId) ? idMap.get(n.parentId)! : mode === "merge" ? parentId : null,
+      ...(n.subboard ? { subboard: true } : {}),
+      // 子白板里的主题保持在子白板里；其余顶层节点按导入方式挂载
+      ...(n.scope && idMap.has(n.scope) ? { scope: idMap.get(n.scope)! } : {}),
+      parentId:
+        n.parentId && idMap.has(n.parentId)
+          ? idMap.get(n.parentId)!
+          : mode === "merge" && !(n.scope && idMap.has(n.scope))
+            ? parentId
+            : null,
       pinned: false,
       x: 0,
       y: 0,
@@ -408,7 +544,7 @@ export class BoardStore {
         chat: this.board.chat,
       });
     }
-    return imported.find((n) => !n.parentId || n.parentId === parentId)?.id;
+    return imported.find((n) => !n.scope && (!n.parentId || n.parentId === parentId))?.id;
   }
 
   upsertTask(task: Task) {
@@ -497,7 +633,8 @@ export class BoardStore {
       .map((n) => {
         const summary = n.summary || (n.kind === "widget" ? "" : firstLine(n.md, 50));
         const parent = n.parentId ? this.get(n.parentId) : undefined;
-        return `- [${n.id}] ${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}${tagText(n)}${parent ? `（属于 [${parent.id}] ${parent.title || "(无标题)"}）` : "（主题）"}`;
+        const scope = this.scopeOf(n.id);
+        return `- [${n.id}] ${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}${tagText(n)}${parent ? `（属于 [${parent.id}] ${parent.title || "(无标题)"}）` : "（主题）"}${scope ? `〔在 ${this.scopeName(scope)}〕` : ""}`;
       })
       .join("\n");
   }
@@ -507,20 +644,28 @@ export class BoardStore {
     if (!this.board.nodes.length) return "(白板为空)";
     if (tag) return this.taggedOutline(normalizeTags([tag])[0] ?? tag);
     const lines: string[] = [];
+    const entries: BoardNode[] = [];
     const walk = (list: BoardNode[], depth: number) => {
       for (const n of list) {
         if (lines.length >= maxNodes) return;
         const summary = n.summary || (n.kind === "widget" ? "" : firstLine(n.md, 50));
-        const tag = n.kind === "widget" ? "[组件] " : "";
-        lines.push(`${"  ".repeat(depth)}- [${n.id}] ${tag}${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}${tagText(n)}`);
+        const tag = n.kind === "widget" ? "[组件] " : n.subboard ? "[子白板] " : "";
+        const inside = n.subboard ? `（入口卡片，里面 ${this.subboardSize(n.id)} 张卡片，见下方「子白板 [${n.id}]」）` : "";
+        if (n.subboard) entries.push(n);
+        lines.push(`${"  ".repeat(depth)}- [${n.id}] ${tag}${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}${tagText(n)}${inside}`);
         walk(this.children(n.id), depth + 1);
       }
     };
-    const roots = this.children(null);
-    if (!this.board.groups.length) walk(roots, 0);
-    else {
-      // 有分组时按分组分段
-      for (const g of this.board.groups) {
+    /** 一块白板（主白板或某个子白板）上的主题，有分组时按分组分段 */
+    const section = (scope: string | undefined) => {
+      const roots = this.children(null).filter((n) => n.scope === scope);
+      const groups = this.board.groups.filter((g) => g.scope === scope);
+      if (!groups.length) {
+        if (roots.length) walk(roots, 0);
+        else lines.push("(空)");
+        return;
+      }
+      for (const g of groups) {
         lines.push(`## 分组 [${g.id}] ${g.title || "(未命名)"}${g.fold ? "（已折叠）" : ""}`);
         const members = roots.filter((n) => n.groupId === g.id);
         if (members.length) walk(members, 0);
@@ -531,6 +676,15 @@ export class BoardStore {
         lines.push("## 未分组");
         walk(rest, 0);
       }
+    };
+    const nested = this.board.nodes.some((n) => n.subboard);
+    if (nested) lines.push("# 主白板");
+    section(undefined);
+    // 子白板按发现的顺序（由外到内）逐个列出
+    for (let i = 0; i < entries.length && lines.length < maxNodes; i++) {
+      const e = entries[i];
+      lines.push("", `# 子白板 [${e.id}] ${e.title || "(未命名)"}（位置：${this.scopeName(e.id)}）`);
+      section(e.id);
     }
     const counts = this.tagCounts();
     if (counts.size) lines.push("", "标签（优先复用已有标签）：" + [...counts].map(([t, c]) => `#${t}(${c})`).join(" "));
@@ -588,6 +742,15 @@ function normalizeBoard(board: Partial<Board>): Board {
   }));
   const groupIds = new Set(groups.map((g) => g.id));
   for (const n of nodes) if (n.groupId && (n.parentId || !groupIds.has(n.groupId))) delete n.groupId;
+  // 子白板：scope 必须指向存在的入口卡片；分组里的主题跟随分组
+  const entries = new Set(nodes.filter((n: BoardNode) => n.subboard).map((n: BoardNode) => n.id));
+  for (const g of groups) if (g.scope && !entries.has(g.scope)) delete g.scope;
+  const groupScope = new Map(groups.map((g) => [g.id, g.scope]));
+  for (const n of nodes) {
+    const scope = n.parentId ? undefined : n.groupId ? groupScope.get(n.groupId) : entries.has(n.scope) ? n.scope : undefined;
+    if (scope) n.scope = scope;
+    else delete n.scope;
+  }
   return { nodes, edges, groups, chat: board.chat ?? [] };
 }
 

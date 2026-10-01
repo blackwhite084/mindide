@@ -25,6 +25,7 @@ const CANVAS_RULES = `白板是一棵（或几棵）思维树，面向内容而�
 - 节点之间的关系用 canvas_link，并写上简短的关系文字（如「导致」「依赖」「反例」），双向关系可以给两个方向写不同的文字。
 - 兄弟节点之间如果其实是「前提 → 展开」「总 → 分」的关系，用 canvas_move_node 形成上下层级，而不是连线。
 - 主题多了（大约 6 个以上）就用 canvas_group 把相关主题分成几个分组，给画面分区；次要的分组可以折叠。主题内部的归类仍然用父子节点，不要用分组。
+- 白板可以嵌套子白板：一张入口卡片，点进去是一块独立的画布（有自己的主题和分组）。某个主题展开得太大、或一组内容自成一块、用户觉得画面太乱时，用 canvas_subboard 收进子白板，主画面只留入口卡片。白板索引里会分段列出每个子白板的内容。
 - 节点默认向右展开；需要时用 side 指定放在父节点的左边 / 下边（如正反方分左右、结论放下边）。不要滥用，大多数节点保持默认。
 - 节点可以带标签（tags），用来标记状态、类型或用户的偏好；新建时用 tags，之后用 canvas_edit_node 的 addTags / removeTags 增删，用 canvas_list 的 tag 参数只看某类节点。优先复用白板上已有的标签，不要造近义的新标签；用户手动加的标签要尊重，不要随意移除。
 - 新建前先看白板索引，避免重复，已有的节点就在原处补充或修改。
@@ -155,6 +156,18 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
       label = args?.groupId ? `更新分组${args?.title ? `「${args.title}」` : ""}` : args?.title ? `新建分组「${args.title}」` : "新建分组…";
       nodeId = args?.ids?.[0];
       break;
+    case "canvas_subboard":
+      label = args?.dissolve
+        ? "解散子白板"
+        : args?.id
+          ? `把 ${name(args.id)} 转为子白板`
+          : args?.title
+            ? `收进子白板「${args.title}」`
+            : args?.boardId
+              ? `移到子白板 ${name(args.boardId)}`
+              : "子白板…";
+      nodeId = args?.id ?? args?.boardId;
+      break;
     case "canvas_ungroup":
       label = args?.ids?.length ? `移出分组 ${args.ids.map((i: string) => name(i)).join("")}` : "解散分组";
       break;
@@ -247,6 +260,8 @@ function streamingToolCall(e: any): { id: string; name: string; arguments?: any 
 interface Pending {
   text: string;
   contextNodeIds: string[];
+  /** 发消息时用户所在的子白板 */
+  view?: string;
 }
 
 /** 主对话：内容写到白板，对话过程写到对话记录 */
@@ -255,6 +270,8 @@ export class MainAgent {
   /** 已发送但尚未被模型接收的消息：完整 prompt → 原始输入 */
   private pending = new Map<string, Pending>();
   private focus: string[] = [];
+  /** 用户所在的子白板（undefined 为主白板）：新主题默认放在这里 */
+  private view: string | undefined;
   private aiEntry: string | undefined;
   private runLabel: string | undefined;
   private suppressSettle = false;
@@ -271,13 +288,15 @@ export class MainAgent {
 
   async init() {
     const defaultParent = () => this.focus.find((id) => this.store.get(id)) ?? null;
-    this.drafts = new DraftTracker(this.store, defaultParent);
+    const view = () => (this.view && this.store.get(this.view)?.subboard ? this.view : undefined);
+    this.drafts = new DraftTracker(this.store, defaultParent, view);
     const ctx: ToolContext = {
       store: this.store,
       by: "AI",
       defaultParent,
+      view,
       claimDraft: (id) => this.drafts.claim(id),
-      dispatch: (title, instructions, ids) => this.tasks.run(title, instructions, ids.length ? ids : this.focus),
+      dispatch: (title, instructions, ids) => this.tasks.run(title, instructions, ids.length ? ids : this.focus, view()),
       skills: true,
     };
     this.session = await makeSession(() => MAIN_PROMPT + skillsPrompt(), ctx, this.sources);
@@ -294,15 +313,15 @@ export class MainAgent {
     };
   }
 
-  chat(text: string, mode: "queue" | "steer", contextNodeIds: string[]) {
+  chat(text: string, mode: "queue" | "steer", contextNodeIds: string[], view?: string) {
     const cmd = parseSkillCommand(text);
     const skill = cmd && findSkill(cmd.name);
     if (cmd && !skill) {
       this.store.emit({ type: "error", message: `技能 ${cmd.name} 不存在` });
       return;
     }
-    const prompt = this.composePrompt(text, contextNodeIds, skill ? skillBlock(skill) : undefined, cmd?.args);
-    this.pending.set(prompt, { text, contextNodeIds });
+    const prompt = this.composePrompt(text, contextNodeIds, view, skill ? skillBlock(skill) : undefined, cmd?.args);
+    this.pending.set(prompt, { text, contextNodeIds, view });
     if (this.session.isStreaming && this.aiEntry) skipAsks(this.store, this.store.getChat(this.aiEntry)?.activity);
     const run = this.session.isStreaming
       ? this.session.prompt(prompt, { streamingBehavior: mode === "steer" ? "steer" : "followUp" })
@@ -310,8 +329,15 @@ export class MainAgent {
     run.catch((err) => this.store.emit({ type: "error", message: String(err?.message ?? err) }));
   }
 
-  private composePrompt(text: string, contextNodeIds: string[], skill?: string, skillArgs?: string) {
+  private composePrompt(text: string, contextNodeIds: string[], view?: string, skill?: string, skillArgs?: string) {
     const parts = [`[白板索引]\n${this.store.outline()}`];
+    const entry = view ? this.store.get(view) : undefined;
+    if (entry?.subboard) {
+      parts.push(
+        `[用户当前所在]\n子白板 [${entry.id}]「${entry.title || "未命名"}」（${this.store.scopeName(entry.id)}）。` +
+          "用户眼前只有这块子白板；新主题默认放在这里，其他白板上的改动用户暂时看不到。",
+      );
+    }
     if (skill) parts.push(`[用户指定的技能]\n${skill}`);
     const sources = this.sources?.outline();
     if (sources) parts.push(`[参考资料]\n${sources}`);
@@ -383,6 +409,7 @@ export class MainAgent {
     this.pending.clear();
     this.session.agent.state.messages = messages as any;
     this.focus = [];
+    this.view = undefined;
     this.aiEntry = undefined;
     this.runLabel = undefined;
     this.store.emit({ type: "queue", queue: this.queueState() });
@@ -423,6 +450,7 @@ export class MainAgent {
         this.finishAi();
         this.aiEntry = undefined;
         this.focus = p?.contextNodeIds ?? [];
+        this.view = p?.view;
         this.runLabel ??= firstLine(text, 30);
         this.store.addChat({ role: "user", text, contextNodeIds: this.focus });
         break;
@@ -484,7 +512,7 @@ export class TaskRunner {
     private sources?: SourceLibrary,
   ) {}
 
-  run(title: string, instructions: string, contextNodeIds: string[]): string {
+  run(title: string, instructions: string, contextNodeIds: string[], view?: string): string {
     const task: Task = {
       id: nanoid(6),
       title: title || firstLine(instructions, 24),
@@ -496,7 +524,7 @@ export class TaskRunner {
       createdAt: Date.now(),
     };
     this.store.upsertTask(task);
-    this.start(task).catch((err) => {
+    this.start(task, view).catch((err) => {
       task.log += `\n\n[错误] ${err?.message ?? err}`;
       task.status = "error";
       this.store.upsertTask(task);
@@ -504,13 +532,15 @@ export class TaskRunner {
     return task.id;
   }
 
-  private async start(task: Task) {
+  private async start(task: Task, view?: string) {
     const anchor = task.contextNodeIds.find((id) => this.store.get(id)) ?? null;
-    const drafts = new DraftTracker(this.store, () => anchor);
+    const scope = () => (view && this.store.get(view)?.subboard ? view : undefined);
+    const drafts = new DraftTracker(this.store, () => anchor, scope);
     const ctx: ToolContext = {
       store: this.store,
       by: `任务「${task.title}」`,
       defaultParent: () => anchor,
+      view: scope,
       claimDraft: (id) => drafts.claim(id),
     };
     const session = await makeSession(() => TASK_PROMPT, ctx, this.sources);

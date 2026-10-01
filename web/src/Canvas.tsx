@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -13,10 +13,12 @@ import {
   type CoordinateExtent,
   type Edge,
   type NodeChange,
+  type Viewport,
 } from "@xyflow/react";
 import type { BoardEdge, BoardNode } from "../../server/types.ts";
 import { animator } from "./animator.ts";
 import { client, type ClientState } from "./client.ts";
+import { representative, scopeMap, scopeOf, scopePath } from "../../server/scope.ts";
 import { GROUP_HEAD, GROUP_PAD, groupKey, layoutTree, type Size } from "./layout.ts";
 import { GroupNode, type GroupFlowNode } from "./GroupNode.tsx";
 import { MdNode, type MdFlowNode } from "./MdNode.tsx";
@@ -41,6 +43,11 @@ const arrow = { type: MarkerType.ArrowClosed, width: 16, height: 16, color: REL_
 const titleOf = (n?: BoardNode) => n?.title || n?.summary.slice(0, 12) || "未命名";
 export const BRANCH_COLORS = ["#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#7dcfff", "#f7768e", "#73daca", "#ff9e64"];
 const ROOT_COLOR = "#c0caf5";
+
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
+const getNode = (id: string) => client.state.nodes.get(id);
+/** 节点所在的白板（null 为主白板） */
+const viewOf = (id: string) => scopeOf(getNode, id) ?? null;
 
 export const colorOf = (branch: number) => (branch < 0 ? ROOT_COLOR : BRANCH_COLORS[branch % BRANCH_COLORS.length]);
 
@@ -68,6 +75,10 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   const userMovedRef = useRef(false);
 
   const nodes = useMemo(() => [...state.nodes.values()], [state.nodes]);
+  // 子白板：只画当前这一层的主题和分组，更深层的内容收在入口卡片里
+  const view = state.view ?? undefined;
+  const scopes = useMemo(() => scopeMap(nodes), [nodes]);
+  const viewNodes = useMemo(() => nodes.filter((n) => scopes.get(n.id) === view), [nodes, scopes, view]);
   // AI 正在准备修改的节点（工具参数还在生成中）。
   // 对话每个 token 都会更新，这里先算成字符串再 memo，避免每个 token 都让所有节点重建
   const pendingKey = (() => {
@@ -85,18 +96,63 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     return ids.sort().join(",");
   })();
   const pendingIds = useMemo(() => new Set(pendingKey ? pendingKey.split(",") : []), [pendingKey]);
+  /** AI 正在改的节点在子白板里：入口卡片也提示 */
+  const pendingShown = useMemo(() => {
+    const out = new Set<string>();
+    for (const id of pendingIds) {
+      const r = representative(scopes, id, view);
+      if (r) out.add(r);
+    }
+    return out;
+  }, [pendingIds, scopes, view]);
   const edgeList = useMemo(() => [...state.edges.values()], [state.edges]);
+  /**
+   * 这一层上的关系线：两端都在这一层的照常画；一端在子白板里的改连到入口卡片上（同一对卡片之间合并成一条）；
+   * 另一端不在这一层之下的，在卡片上记一个「外部关系」
+   */
+  const rel = useMemo(() => {
+    const direct: BoardEdge[] = [];
+    const agg = new Map<string, BoardEdge & { count: number }>();
+    const external = new Map<string, string[]>();
+    for (const e of edgeList) {
+      const s = representative(scopes, e.source, view);
+      const t = representative(scopes, e.target, view);
+      if (s && t) {
+        if (s === t) continue;
+        if (s === e.source && t === e.target) {
+          direct.push(e);
+          continue;
+        }
+        const key = [s, t].sort().join("|");
+        const prev = agg.get(key);
+        if (prev) {
+          prev.count++;
+          prev.dir = "none";
+          prev.label = `${prev.count} 条关系`;
+          delete prev.reverseLabel;
+        } else agg.set(key, { ...e, id: `agg-${key}`, source: s, target: t, count: 1 });
+      } else if (s || t) {
+        const host = (s ?? t)!;
+        external.set(host, [...(external.get(host) ?? []), s ? e.target : e.source]);
+      }
+    }
+    return { direct, agg: [...agg.values()], external };
+  }, [edgeList, scopes, view]);
+  const viewEdges = useMemo(() => [...rel.direct, ...rel.agg], [rel]);
   // 版本对比：当前白板相对历史版本的变化
   const diff = useMemo(
     () => (state.compare ? diffBoards(state.compare.board, nodes, edgeList) : null),
     [state.compare, nodes, edgeList],
   );
-  const groupList = useMemo(() => [...state.groups.values()].sort((a, b) => a.createdAt - b.createdAt), [state.groups]);
+  const groupList = useMemo(
+    () => [...state.groups.values()].filter((g) => g.scope === view).sort((a, b) => a.createdAt - b.createdAt),
+    [state.groups, view],
+  );
   /** AI 一轮结束且新加了顶层主题：忽略已存的列号，重新分一次列 */
   const [repack, setRepack] = useState(false);
   const layout = useMemo(
-    () => layoutTree(nodes, sizes, edgeList, groupList, { repack }),
-    [nodes, sizes, edgeList, groupList, repack],
+    () => layoutTree(viewNodes, sizes, viewEdges, groupList, { repack }),
+    [viewNodes, sizes, viewEdges, groupList, repack],
   );
   // 分列只在 AI 不工作时定下来并存到主题 / 分组上，之后手动编辑不会让树换列；
   // 手动新建的主题排到最后一列，不影响其他树
@@ -137,13 +193,44 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     }
     return stats;
   }, [nodes, groupList, state.nodes]);
+  // 每个子白板入口：里面（含更深层）的卡片数和主题标题
+  const subStats = useMemo(() => {
+    const stats = new Map<string, { cards: number; topics: string[] }>();
+    for (const n of viewNodes) if (n.subboard) stats.set(n.id, { cards: 0, topics: [] });
+    if (!stats.size) return stats;
+    for (const n of [...nodes].sort((a, b) => a.createdAt - b.createdAt)) {
+      const r = representative(scopes, n.id, view);
+      const st = r && r !== n.id ? stats.get(r) : undefined;
+      if (!st) continue;
+      st.cards++;
+      if (!n.parentId && scopes.get(n.id) === r) st.topics.push(titleOf(n));
+    }
+    return stats;
+  }, [nodes, viewNodes, scopes, view]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+
+  /** 切到节点所在的那一层白板，等排好版 */
+  const skipFitRef = useRef(false);
+  const showScopeOf = useCallback(async (id: string) => {
+    const target = viewOf(id);
+    if (target === client.state.view) return;
+    skipFitRef.current = true;
+    client.setView(target);
+    for (let i = 0; i < 30 && !layoutRef.current.pos.has(id); i++) await nextFrame();
+    await nextFrame();
+    await nextFrame();
+  }, []);
 
   /** 节点不在视野内时平滑移过去；已经可见就不动镜头 */
   const ensureVisible = useCallback(
     async (id: string, force = false) => {
       if (!force && (!followRef.current || userMovedRef.current)) return;
+      // 在别的白板上：只有用户主动定位时才切过去，AI 的改动不打断用户
+      if (viewOf(id) !== client.state.view) {
+        if (!force) return;
+        await showScopeOf(id);
+      }
       // 在折叠的分支里：先展开祖先
       let root = client.state.nodes.get(id);
       for (let n = root; n?.parentId; n = client.state.nodes.get(n.parentId)) {
@@ -170,7 +257,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       if (visible && !force) return;
       await rf.setCenter(p.x + s.w / 2, p.y + Math.min(s.h, 260) / 2, { zoom: Math.max(zoom, 0.75), duration: 480 });
     },
-    [rf, sizes],
+    [rf, sizes, showScopeOf],
   );
 
   useEffect(() => {
@@ -178,12 +265,32 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     animator.onIdle = () => {
       userMovedRef.current = false;
     };
-    ui.focusNode = (id) => {
+    ui.focusNode = async (id) => {
+      await showScopeOf(id);
       setRfNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
       onSelectionChange([id]);
       ensureVisible(id, true);
     };
-  }, [ensureVisible, onSelectionChange]);
+  }, [ensureVisible, onSelectionChange, showScopeOf]);
+
+  // 进出子白板：清掉选中；回到去过的一层时恢复当时的镜头，第一次进入则看全局
+  const viewports = useRef(new Map<string, Viewport>());
+  const prevView = useRef(state.view);
+  useEffect(() => {
+    const prev = prevView.current;
+    if (prev === state.view) return;
+    prevView.current = state.view;
+    viewports.current.set(prev ?? "", rf.getViewport());
+    onSelectionChange([]);
+    setSelEdges([]);
+    if (skipFitRef.current) {
+      skipFitRef.current = false;
+      return;
+    }
+    const saved = viewports.current.get(state.view ?? "");
+    const t = setTimeout(() => (saved ? rf.setViewport(saved, { duration: 300 }) : rf.fitView({ duration: 300, maxZoom: 1 })), 120);
+    return () => clearTimeout(t);
+  }, [state.view, rf, onSelectionChange]);
 
   // 选中高亮：选中节点 → 它的父子、关系线和相连节点；选中关系线 → 两端节点
   const [selEdges, setSelEdges] = useState<string[]>([]);
@@ -209,7 +316,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           edges.add(`t-${child}`);
         }
       }
-      for (const e of edgeList) {
+      for (const e of viewEdges) {
         if (e.source === id || e.target === id) {
           edges.add(e.id);
           nodes.add(e.source);
@@ -225,7 +332,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       nodes.add(e.target);
     }
     return { nodes, edges, primary: new Set(selNodes) };
-  }, [selNodesKey, selEdges, layout, edgeList, state.edges]);
+  }, [selNodesKey, selEdges, layout, viewEdges, state.edges]);
   const focusKey = focus ? [...focus.nodes].sort().join(",") : "";
 
   // 状态 + 布局 → React Flow 节点，保留选中、测量、拖动中的状态
@@ -284,7 +391,10 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           childCount: layout.childCount.get(id) ?? 0,
           detail,
           dropTarget: dropTarget === id,
-          pending: pendingIds.has(id),
+          pending: pendingShown.has(id),
+          subCards: subStats.get(id)?.cards,
+          subTopics: subStats.get(id)?.topics.join("、"),
+          external: rel.external.get(id)?.join(","),
           mirror: layout.mirror.get(id) ?? false,
           dim: (!!focus && !focus.nodes.has(id)) || (!!state.tagFilter && !n.tags?.includes(state.tagFilter)),
           related: !!focus && focus.nodes.has(id) && !focus.primary.has(id),
@@ -324,7 +434,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       return [...groupNodes, ...cards];
     });
     // 用 focusKey 而不是 focus 作依赖：只有高亮的节点集合变了才需要重建
-  }, [state.nodes, layout, detail, dropTarget, pendingIds, focusKey, diff, groupList, groupStats, dropGroup, dragBox, altHeld, state.tagFilter]);
+  }, [state.nodes, layout, detail, dropTarget, pendingShown, focusKey, diff, groupList, groupStats, dropGroup, dragBox, altHeld, state.tagFilter, subStats, rel]);
 
   const edges: Edge[] = useMemo(() => {
     const tree: Edge[] = [];
@@ -350,14 +460,16 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       });
     }
     const shown = new Set(layout.visible);
-    const links: Edge[] = edgeList
+    const links: Edge[] = viewEdges
       .filter((e) => shown.has(e.source) && shown.has(e.target))
       .map((e) => ({
         id: e.id,
         type: "relation",
         source: e.source,
         target: e.target,
-        className: `rel-edge ${edgeState(focus, e.id)}`,
+        // 连到子白板入口的线是合并出来的，不能单独编辑
+        className: `rel-edge ${e.id.startsWith("agg-") ? "agg" : ""} ${edgeState(focus, e.id)}`,
+        selectable: !e.id.startsWith("agg-"),
         selected: selEdges.includes(e.id),
         markerEnd: arrow,
         markerStart: arrow,
@@ -367,10 +479,11 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           targetTitle: titleOf(state.nodes.get(e.target)),
           lane: layout.lanes.get(e.id) ?? 0,
           state: edgeState(focus, e.id),
+          agg: e.id.startsWith("agg-"),
         },
       }));
     return [...tree, ...links];
-  }, [layout, edgeList, state.nodes, focus, selEdges]);
+  }, [layout, viewEdges, state.nodes, focus, selEdges]);
 
   const nodeMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
@@ -389,11 +502,23 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         })),
       ...(gid ? [{ label: "移出分组", onClick: () => client.send({ type: "node:toGroup", id, groupId: null }) }] : []),
     ];
+    // 子白板：收进新的 / 移进这一层上已有的 / 移到上一层
+    const ids = multi ? selected : [id];
+    const toScope = (scope: string | null) => ids.forEach((nid) => client.send({ type: "node:toScope", id: nid, scope }));
+    const boardItems: MenuItem[] = [
+      { label: "收进新子白板", onClick: () => client.createSubboard(ids, multi ? "新子白板" : titleOf(n)) },
+      ...layout.visible
+        .map((vid) => state.nodes.get(vid)!)
+        .filter((b) => b.subboard && !ids.includes(b.id) && !ids.some((nid) => isDescendant(b.id, nid)))
+        .map((b) => ({ label: `移到子白板「${titleOf(b)}」`, onClick: () => toScope(b.id) })),
+      ...(state.view ? [{ label: "移到上一层白板", onClick: () => toScope(viewOf(state.view!)) }] : []),
+    ];
     const items: MenuItem[] = multi
       ? [
           { title: `已选中 ${selected.length} 个节点` },
           { label: "让 AI 处理这些节点…", hint: "推荐", onClick: () => ui.focusComposer(`想让 AI 怎么处理这 ${selected.length} 个节点？`) },
           { label: "打包成分组", hint: "⌘G", onClick: () => client.createGroup(selected) },
+          ...boardItems,
           ...(n.parentId
             ? [
                 { title: "放在父节点的" },
@@ -411,6 +536,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         ]
       : [
           { title: titleOf(n) },
+          ...(n.subboard ? [{ label: "进入子白板", hint: "双击", onClick: () => client.setView(id) }] : []),
           { label: "让 AI 改这个节点…", hint: "推荐", onClick: () => ui.askAI(id, titleOf(n)) },
           { sep: true },
           { label: "查看详情", hint: "Space", onClick: () => ui.openDetail(id) },
@@ -434,6 +560,15 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           ...(n.parentId ? [{ label: "变成独立主题", onClick: () => client.patchNode(id, { parentId: null }) }] : []),
           { sep: true },
           ...groupItems,
+          { sep: true },
+          ...(n.subboard
+            ? [{ label: "解散子白板", hint: "内容放回这一层", onClick: () => client.send({ type: "subboard:dissolve", id }) }]
+            : [
+                ...((layout.childCount.get(id) ?? 0) > 0
+                  ? [{ label: "转为子白板", hint: "子节点收进去", onClick: () => client.send({ type: "subboard:convert", id }) }]
+                  : []),
+              ]),
+          ...boardItems,
           { sep: true },
           { label: "删除", danger: true, hint: "⌫", onClick: () => client.send({ type: "node:delete", id }) },
         ];
@@ -516,6 +651,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           onClick: () => client.createGroup([], { x: Math.round(p.x + GROUP_PAD), y: Math.round(p.y + GROUP_PAD + GROUP_HEAD) }),
         },
         { label: "全览", onClick: () => rf.fitView({ duration: 400, maxZoom: 1 }) },
+        ...(state.view ? [{ label: "返回上一层白板", hint: "Esc", onClick: () => client.setView(viewOf(state.view!)) }] : []),
       ],
     });
   };
@@ -612,7 +748,9 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     }
     const target = findDropTarget(node.id);
     if (target) {
-      client.patchNode(node.id, { parentId: target, pinned: false });
+      // 拖到子白板的入口卡片上：收进这个子白板
+      if (client.state.nodes.get(target)?.subboard) client.send({ type: "node:toScope", id: node.id, scope: target });
+      else client.patchNode(node.id, { parentId: target, pinned: false });
       return;
     }
     const abs = rf.getInternalNode(node.id)?.internals.positionAbsolute ?? node.position;
@@ -660,6 +798,19 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [rf]);
+
+  // Esc：从子白板返回上一层（菜单、弹窗、输入框优先处理自己的 Esc，所以在捕获阶段先判断）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const v = client.state.view;
+      if (e.key !== "Escape" || !v) return;
+      if ((e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
+      if (ui.getMenu() || ui.getDetail() || document.querySelector(".palette")) return;
+      client.setView(viewOf(v));
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   // 按住 ⌥：分组里的卡片可以拖出框
   useEffect(() => {
@@ -736,7 +887,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       onNodeDrag={onDrag}
       onNodeDragStop={onDragStop}
       onNodesDelete={(ns) => ns.filter((n) => !isGroup(n)).forEach((n) => client.send({ type: "node:delete", id: n.id }))}
-      onEdgesDelete={(es) => es.filter((e) => !e.id.startsWith("t-")).forEach((e) => client.send({ type: "edge:delete", id: e.id }))}
+      onEdgesDelete={(es) => es.filter((e) => !e.id.startsWith("t-") && !e.id.startsWith("agg-")).forEach((e) => client.send({ type: "edge:delete", id: e.id }))}
       onConnect={(c) => c.source && c.target && client.send({ type: "edge:add", source: c.source, target: c.target })}
       onMoveStart={(e) => {
         // 只有用户操作才带事件；setCenter / fitView 触发的没有
@@ -760,7 +911,15 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         nodeBorderRadius={6}
         nodeColor={(n) => (isGroup(n) ? `${(n.data as GroupFlowNode["data"]).color}33` : (n.data as MdFlowNode["data"]).color)}
       />
-      <TagBar state={state} />
+      <Panel position="top-left" className="canvas-top">
+        <Breadcrumb state={state} />
+        <TagBar state={state} />
+      </Panel>
+      {view && !viewNodes.length && (
+        <Panel position="top-center" className="sub-empty">
+          子白板还是空的：双击空白处新建主题，或在别的白板上把卡片拖到入口卡片上收进来
+        </Panel>
+      )}
       <Controls showInteractive={false}>
         <ControlButton
           title="新建：选中节点时加子节点，否则新建主题"
@@ -773,6 +932,33 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         </ControlButton>
       </Controls>
     </ReactFlow>
+  );
+}
+
+/** 子白板的路径：主白板 › … › 当前，点击返回那一层 */
+function Breadcrumb({ state }: { state: ClientState }) {
+  if (!state.view) return null;
+  const get = (id: string) => state.nodes.get(id);
+  const path = scopePath(get, state.view);
+  return (
+    <div className="crumbs">
+      <button className="crumb" onClick={() => client.setView(null)}>
+        主白板
+      </button>
+      {path.map((id, i) => (
+        <Fragment key={id}>
+          <span className="crumb-sep">›</span>
+          {i === path.length - 1 ? (
+            <span className="crumb cur">▣ {titleOf(get(id))}</span>
+          ) : (
+            <button className="crumb" onClick={() => client.setView(id)}>
+              {titleOf(get(id))}
+            </button>
+          )}
+        </Fragment>
+      ))}
+      <span className="crumb-hint">Esc 返回上一层</span>
+    </div>
   );
 }
 
