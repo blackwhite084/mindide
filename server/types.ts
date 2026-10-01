@@ -67,6 +67,8 @@ export interface BoardNode {
   groupId?: string;
   /** 模型仍在生成中的草稿节点 */
   draft?: boolean;
+  /** 自定义标签：可以标记为任何东西（状态、类型、用户的偏好……），用于筛选和定位 */
+  tags?: string[];
   lastEdit?: LastEdit;
   createdAt: number;
   updatedAt: number;
@@ -207,7 +209,7 @@ export interface VersionMeta {
 }
 
 export type NodePatch = Partial<
-  Pick<BoardNode, "title" | "summary" | "md" | "x" | "y" | "pinned" | "open" | "fold" | "parentId">
+  Pick<BoardNode, "title" | "summary" | "md" | "x" | "y" | "pinned" | "open" | "fold" | "parentId" | "tags">
 >;
 
 // ---------- 服务端 → 客户端 ----------
@@ -276,7 +278,7 @@ export type ClientMsg =
       mode: "replace" | "merge";
       name: string;
       parentId?: string | null;
-      nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind">[];
+      nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags">[];
       edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[];
     }
   | { type: "version:checkout"; id: string }

@@ -93,6 +93,22 @@ export class BoardStore {
     return false;
   }
 
+  /** 所有标签及使用次数 */
+  tagCounts(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const n of this.board.nodes) for (const t of n.tags ?? []) counts.set(t, (counts.get(t) ?? 0) + 1);
+    return counts;
+  }
+
+  addRemoveTags(id: string, add: string[] = [], remove: string[] = []) {
+    const node = this.get(id);
+    if (!node) return;
+    const drop = new Set(normalizeTags(remove));
+    const tags = normalizeTags([...(node.tags ?? []), ...add]).filter((t) => !drop.has(t));
+    if (tags.join("\n") === (node.tags ?? []).join("\n")) return node;
+    return this.updateNode(id, { tags });
+  }
+
   createNode(init: Partial<BoardNode>, animate = false): BoardNode {
     const now = Date.now();
     const node: BoardNode = {
@@ -111,6 +127,10 @@ export class BoardStore {
       updatedAt: now,
       ...init,
     };
+    if (node.tags) {
+      node.tags = normalizeTags(node.tags);
+      if (!node.tags.length) delete node.tags;
+    }
     if (node.parentId && !this.get(node.parentId)) node.parentId = null;
     if (node.parentId || (node.groupId && !this.getGroup(node.groupId))) delete node.groupId;
     this.board.nodes.push(node);
@@ -127,10 +147,12 @@ export class BoardStore {
         delete patch.parentId;
       }
     }
+    if (patch.tags) patch.tags = normalizeTags(patch.tags);
     const groupBefore = this.groupOf(id);
     // 主题从树上断开时留在原来的分组；挂到别的节点下则跟随新的主题
     if (patch.parentId === null && node.parentId && !("groupId" in patch)) patch.groupId = groupBefore;
     Object.assign(node, patch, { updatedAt: Date.now() });
+    if (node.tags && !node.tags.length) delete node.tags;
     if (node.parentId || !node.groupId || !this.getGroup(node.groupId)) delete node.groupId;
     // 换了分组：原来固定的位置是相对旧分组的，不再有意义
     if (this.groupOf(id) !== groupBefore) {
@@ -340,7 +362,7 @@ export class BoardStore {
   /** 导入一组节点和关系；merge 时重新分配 id，避免和现有节点冲突 */
   importNodes(
     mode: "replace" | "merge",
-    nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind">[],
+    nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags">[],
     edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[],
     parentId: string | null = null,
   ) {
@@ -353,6 +375,7 @@ export class BoardStore {
       title: n.title ?? "",
       summary: n.summary ?? "",
       md: n.md ?? "",
+      ...(Array.isArray(n.tags) && normalizeTags(n.tags).length ? { tags: normalizeTags(n.tags) } : {}),
       parentId: n.parentId && idMap.has(n.parentId) ? idMap.get(n.parentId)! : mode === "merge" ? parentId : null,
       pinned: false,
       x: 0,
@@ -463,16 +486,30 @@ export class BoardStore {
     });
   }
 
+  /** 带某个标签的节点（平铺，注明所在的父节点） */
+  private taggedOutline(tag: string) {
+    const hits = this.board.nodes.filter((n) => n.tags?.includes(tag));
+    if (!hits.length) return `(没有带 #${tag} 标签的节点)`;
+    return hits
+      .map((n) => {
+        const summary = n.summary || (n.kind === "widget" ? "" : firstLine(n.md, 50));
+        const parent = n.parentId ? this.get(n.parentId) : undefined;
+        return `- [${n.id}] ${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}${tagText(n)}${parent ? `（属于 [${parent.id}] ${parent.title || "(无标题)"}）` : "（主题）"}`;
+      })
+      .join("\n");
+  }
+
   /** 给模型看的思维树（缩进表示层级） */
-  outline(maxNodes = 150) {
+  outline(maxNodes = 150, tag?: string) {
     if (!this.board.nodes.length) return "(白板为空)";
+    if (tag) return this.taggedOutline(normalizeTags([tag])[0] ?? tag);
     const lines: string[] = [];
     const walk = (list: BoardNode[], depth: number) => {
       for (const n of list) {
         if (lines.length >= maxNodes) return;
         const summary = n.summary || (n.kind === "widget" ? "" : firstLine(n.md, 50));
         const tag = n.kind === "widget" ? "[组件] " : "";
-        lines.push(`${"  ".repeat(depth)}- [${n.id}] ${tag}${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}`);
+        lines.push(`${"  ".repeat(depth)}- [${n.id}] ${tag}${n.title || "(无标题)"}${summary ? ` — ${summary}` : ""}${tagText(n)}`);
         walk(this.children(n.id), depth + 1);
       }
     };
@@ -492,6 +529,8 @@ export class BoardStore {
         walk(rest, 0);
       }
     }
+    const counts = this.tagCounts();
+    if (counts.size) lines.push("", "标签（优先复用已有标签）：" + [...counts].map(([t, c]) => `#${t}(${c})`).join(" "));
     if (this.board.edges.length) {
       lines.push("", "关系：");
       for (const e of this.board.edges) {
@@ -503,6 +542,17 @@ export class BoardStore {
     return lines.join("\n");
   }
 }
+
+export function normalizeTags(tags: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const raw of tags) {
+    const t = String(raw).replace(/^#+/, "").replace(/\s+/g, " ").trim().slice(0, 20);
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out.slice(0, 8);
+}
+
+const tagText = (n: BoardNode) => (n.tags?.length ? " " + n.tags.map((t) => `#${t}`).join(" ") : "");
 
 function stripUndefined<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;

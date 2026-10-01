@@ -35,8 +35,16 @@ export function SearchPalette({ state }: { state: ClientState }) {
         const title = n.title.toLowerCase();
         const summary = summaryOf(n).toLowerCase();
         const md = n.md.toLowerCase();
+        const tags = (n.tags ?? []).map((t) => t.toLowerCase());
         let score = 0;
         for (const w of words) {
+          // #标签：按标签筛选
+          if (w.startsWith("#")) {
+            const t = w.slice(1);
+            if (tags.some((x) => x.includes(t))) score += 5;
+            else return { n, score: -1, where: "" };
+            continue;
+          }
           if (title.includes(w)) score += title.startsWith(w) ? 6 : 4;
           else if (summary.includes(w)) score += 2;
           else if (md.includes(w)) score += 1;
@@ -71,7 +79,7 @@ export function SearchPalette({ state }: { state: ClientState }) {
         <input
           ref={input}
           value={q}
-          placeholder="搜索节点…"
+          placeholder="搜索节点… （#标签 按标签筛选）"
           onChange={(e) => {
             setQ(e.target.value);
             setActive(0);
@@ -99,6 +107,7 @@ export function SearchPalette({ state }: { state: ClientState }) {
             >
               <div className="palette-title">{n.title || summaryOf(n).slice(0, 20) || "未命名"}</div>
               <div className="palette-sub">{where || summaryOf(n)}</div>
+              {!!n.tags?.length && <div className="palette-path">{n.tags.map((t) => `#${t}`).join(" ")}</div>}
               {pathOf(n.id) && <div className="palette-path">{pathOf(n.id)}</div>}
             </div>
           ))}

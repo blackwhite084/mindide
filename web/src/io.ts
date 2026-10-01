@@ -2,7 +2,7 @@ import type { BoardEdge, BoardNode } from "../../server/types.ts";
 
 /** 导入导出用的精简结构（不含对话、布局状态） */
 export interface Fragment {
-  nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind">[];
+  nodes: Pick<BoardNode, "id" | "title" | "summary" | "md" | "parentId" | "kind" | "tags">[];
   edges: Pick<BoardEdge, "source" | "target" | "dir" | "label" | "reverseLabel">[];
 }
 
@@ -26,6 +26,7 @@ export function toMarkdown(nodes: BoardNode[], edges: BoardEdge[]): string {
       if (depth < 6) out.push(`${"#".repeat(depth + 1)} ${title}`, "");
       else out.push(`${"  ".repeat(depth - 6)}- **${title}**`, "");
       if (n.summary && n.summary !== title) out.push(`> ${n.summary}`, "");
+      if (n.tags?.length) out.push(n.tags.map((t) => `\`#${t}\``).join(" "), "");
       // 正文里的标题降级，避免打乱导出的层级
       if (n.kind === "widget") {
         if (n.md.trim()) out.push("```html", n.md.trim(), "```", "");
@@ -57,7 +58,7 @@ export function toJSON(nodes: BoardNode[], edges: BoardEdge[]): string {
     format: "ai-minder",
     version: 1,
     exportedAt: new Date().toISOString(),
-    nodes: nodes.map(({ id, title, summary, md, parentId, kind }) => ({ id, title, summary, md, parentId, kind })),
+    nodes: nodes.map(({ id, title, summary, md, parentId, kind, tags }) => ({ id, title, summary, md, parentId, kind, ...(tags?.length ? { tags } : {}) })),
     edges: edges.map(({ source, target, dir, label, reverseLabel }) => ({ source, target, dir, label, reverseLabel })),
   };
   return JSON.stringify(data, null, 2);
@@ -174,6 +175,7 @@ export function fromJSON(text: string): Fragment {
         md: String(n.md ?? ""),
         parentId: n.parentId ?? null,
         kind: n.kind === "task" || n.kind === "widget" ? n.kind : "note",
+        ...(Array.isArray(n.tags) && n.tags.length ? { tags: n.tags.map(String) } : {}),
       })),
     edges: (src.edges ?? [])
       .filter((e: any) => e && e.source && e.target)

@@ -6,6 +6,7 @@ import {
   Controls,
   MiniMap,
   MarkerType,
+  Panel,
   ReactFlow,
   applyNodeChanges,
   useReactFlow,
@@ -23,6 +24,7 @@ import { diffBoards, fullText } from "./compare.ts";
 import { RelationEdge } from "./RelationEdge.tsx";
 import { RelationForm } from "./RelationForm.tsx";
 import { ui, type MenuItem } from "./ui.ts";
+import { TagBar, TagForm } from "./Tags.tsx";
 
 const nodeTypes = { md: MdNode, group: GroupNode };
 type FlowNode = MdFlowNode | GroupFlowNode;
@@ -255,7 +257,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           detail,
           dropTarget: dropTarget === id,
           pending: pendingIds.has(id),
-          dim: !!focus && !focus.nodes.has(id),
+          dim: (!!focus && !focus.nodes.has(id)) || (!!state.tagFilter && !n.tags?.includes(state.tagFilter)),
           related: !!focus && focus.nodes.has(id) && !focus.primary.has(id),
           diff: diff?.nodes.get(id),
           beforeText: diff?.nodes.get(id) === "modified" ? fullText(diff.before.get(id)!) : undefined,
@@ -293,7 +295,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       return [...groupNodes, ...cards];
     });
     // 用 focusKey 而不是 focus 作依赖：只有高亮的节点集合变了才需要重建
-  }, [state.nodes, layout, detail, dropTarget, pendingIds, focusKey, diff, groupList, groupStats, dropGroup, dragBox, altHeld]);
+  }, [state.nodes, layout, detail, dropTarget, pendingIds, focusKey, diff, groupList, groupStats, dropGroup, dragBox, altHeld, state.tagFilter]);
 
   const edges: Edge[] = useMemo(() => {
     const tree: Edge[] = [];
@@ -353,6 +355,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           { title: `已选中 ${selected.length} 个节点` },
           { label: "让 AI 处理这些节点…", hint: "推荐", onClick: () => ui.focusComposer(`想让 AI 怎么处理这 ${selected.length} 个节点？`) },
           { label: "打包成分组", hint: "⌘G", onClick: () => client.createGroup(selected) },
+          { label: "标签…", onClick: () => ui.openMenu({ x: e.clientX, y: e.clientY, items: [], form: <TagForm ids={selected} /> }) },
           { sep: true },
           { label: `删除 ${selected.length} 个节点`, danger: true, onClick: () => selected.forEach((sid) => client.send({ type: "node:delete", id: sid })) },
         ]
@@ -374,6 +377,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
             ? [{ label: n.fold ? "展开分支" : "折叠分支", onClick: () => client.patchNode(id, { fold: !n.fold }) }]
             : []),
           { label: n.kind === "widget" ? "编辑代码" : "手动编辑", onClick: () => ui.requestEdit(id) },
+          { label: "标签…", onClick: () => ui.openMenu({ x: e.clientX, y: e.clientY, items: [], form: <TagForm ids={[id]} /> }) },
           { label: "添加子节点", hint: "Tab", onClick: () => client.createNode(id) },
           { label: "添加同级节点", hint: "⇧Tab", onClick: () => createSibling(n) },
           ...(n.pinned ? [{ label: "恢复自动排版", onClick: () => client.patchNode(id, { pinned: false }) }] : []),
@@ -706,6 +710,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
         nodeBorderRadius={6}
         nodeColor={(n) => (isGroup(n) ? `${(n.data as GroupFlowNode["data"]).color}33` : (n.data as MdFlowNode["data"]).color)}
       />
+      <TagBar state={state} />
       <Controls showInteractive={false}>
         <ControlButton
           title="新建：选中节点时加子节点，否则新建主题"

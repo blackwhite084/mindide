@@ -40,6 +40,8 @@ export interface ClientState {
   boards: BoardMeta[];
   board: string;
   skills: SkillInfo[];
+  /** 按标签筛选（只在本地）：不匹配的节点变淡 */
+  tagFilter: string | null;
   models: ModelInfo[];
   model: string | null;
   thinking: ThinkingLevel;
@@ -71,6 +73,7 @@ class Client {
     boards: [],
     board: "",
     skills: [],
+    tagFilter: null,
     models: [],
     model: null,
     thinking: "low",
@@ -259,6 +262,10 @@ class Client {
   }
 
   /** 本地立即更新并同步给服务端（避免拖动、折叠等操作等待往返） */
+  setTagFilter(tag: string | null) {
+    this.set({ tagFilter: tag });
+  }
+
   patchNode(id: string, patch: NodePatch) {
     const n = this.state.nodes.get(id);
     if (!n) return;

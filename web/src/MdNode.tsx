@@ -8,6 +8,7 @@ import { client, summaryOf } from "./client.ts";
 import { fullText } from "./compare.ts";
 import { ui } from "./ui.ts";
 import { WidgetFrame } from "./WidgetFrame.tsx";
+import { tagColor } from "./Tags.tsx";
 
 export type MdFlowNode = Node<
   {
@@ -352,6 +353,21 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
             {body}
           </div>
         </>
+      )}
+      {!editing && !!node.tags?.length && (
+        <div className="tag-chips nodrag">
+          {node.tags.map((t) => (
+            <button
+              key={t}
+              className={`tag-chip ${client.state.tagFilter === t ? "on" : ""}`}
+              style={{ "--tc": tagColor(t) } as React.CSSProperties}
+              title="按这个标签筛选"
+              onClick={() => client.setTagFilter(client.state.tagFilter === t ? null : t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
       )}
       {floating}
       {childCount > 0 && (

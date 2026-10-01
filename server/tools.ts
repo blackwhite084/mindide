@@ -35,6 +35,10 @@ async function widgetReport(ctx: ToolContext, id: string) {
   return r.error ? `运行报错，请用 canvas_edit_node 修复：\n${r.error}` : "运行正常";
 }
 
+const tagAttr = (n: { tags?: string[] }) => (n.tags?.length ? ` tags="${n.tags.join(",")}"` : "");
+
+const TAGS_DESC = "标签：自由文本的短标记（状态、类型、优先级……），不带 #；优先复用白板上已有的标签";
+
 function parentOf(ctx: ToolContext, parentId: string | null | undefined) {
   if (parentId === null || parentId === "" || parentId === "root") return null;
   if (parentId === undefined) return ctx.defaultParent();
@@ -102,9 +106,10 @@ export function createCanvasTools(ctx: ToolContext) {
   const list = defineTool({
     name: "canvas_list",
     label: "查看白板",
-    description: "查看整棵思维树：每个节点的 id、标题和摘要，缩进表示层级；有分组时按分组分段",
-    parameters: Type.Object({}),
-    execute: async () => result(ctx.store.outline(400)),
+    description:
+      "查看整棵思维树：每个节点的 id、标题、摘要和标签，缩进表示层级；有分组时按分组分段。传 tag 时只列出带该标签的节点（平铺）。",
+    parameters: Type.Object({ tag: Type.Optional(Type.String({ description: "只看带这个标签的节点，如 todo" })) }),
+    execute: async (_id, { tag }) => result(ctx.store.outline(400, tag)),
   });
 
   const read = defineTool({
@@ -119,9 +124,9 @@ export function createCanvasTools(ctx: ToolContext) {
             const n = must(ctx, id);
             if (n.kind === "widget") {
               const error = ctx.store.widgetResult(n.id)?.error;
-              return `<widget id="${n.id}" parent="${n.parentId ?? "root"}" title="${n.title}" summary="${n.summary}">\n${n.md}\n</widget>${error ? `\n<runtime-error>\n${error}\n</runtime-error>` : ""}`;
+              return `<widget id="${n.id}" parent="${n.parentId ?? "root"}" title="${n.title}" summary="${n.summary}"${tagAttr(n)}>\n${n.md}\n</widget>${error ? `\n<runtime-error>\n${error}\n</runtime-error>` : ""}`;
             }
-            return `<node id="${n.id}" parent="${n.parentId ?? "root"}" title="${n.title}" summary="${n.summary}">\n${n.md}\n</node>`;
+            return `<node id="${n.id}" parent="${n.parentId ?? "root"}" title="${n.title}" summary="${n.summary}"${tagAttr(n)}>\n${n.md}\n</node>`;
           })
           .join("\n\n"),
       ),
@@ -140,15 +145,16 @@ export function createCanvasTools(ctx: ToolContext) {
       title: Type.String({ description: "简短标题，≤ 16 字" }),
       summary: Type.String({ description: "一句话要点摘要，≤ 40 字，折叠时展示" }),
       md: Type.String({ description: "正文 Markdown，可展开查看；没有更多细节时可以为空" }),
+      tags: Type.Optional(Type.Array(Type.String(), { description: TAGS_DESC })),
     }),
-    execute: async (toolCallId, { title, summary, md, parentId }) => {
+    execute: async (toolCallId, { title, summary, md, parentId, tags }) => {
       const parent = parentOf(ctx, parentId);
       const draftId = ctx.claimDraft?.(toolCallId);
       if (draftId) {
-        ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false });
+        ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false, ...(tags ? { tags } : {}) });
         return result(`已创建节点 ${draftId}`, draftId);
       }
-      const node = ctx.store.createNode({ title, summary, md, parentId: parent, groupId: topicGroup(ctx, parent) }, true);
+      const node = ctx.store.createNode({ title, summary, md, parentId: parent, groupId: topicGroup(ctx, parent), tags }, true);
       return result(`已创建节点 ${node.id}`, node.id);
     },
   });
@@ -191,9 +197,12 @@ export function createCanvasTools(ctx: ToolContext) {
       md: Type.Optional(Type.String({ description: "整体重写后的完整正文" })),
       title: Type.Optional(Type.String()),
       summary: Type.Optional(Type.String()),
+      addTags: Type.Optional(Type.Array(Type.String(), { description: "要添加的" + TAGS_DESC })),
+      removeTags: Type.Optional(Type.Array(Type.String(), { description: "要移除的标签" })),
     }),
-    execute: async (_id, { id, edits, md, title, summary }) => {
+    execute: async (_id, { id, edits, md, title, summary, addTags, removeTags }) => {
       const node = must(ctx, id);
+      if (addTags?.length || removeTags?.length) ctx.store.addRemoveTags(node.id, addTags, removeTags);
       let next = md ?? node.md;
       for (const e of edits ?? []) {
         const count = next.split(e.old).length - 1;

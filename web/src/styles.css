@@ -700,3 +700,11 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .skill-item.active, .skill-item:hover { background: rgba(122, 162, 247, 0.14); }
 .skill-name { color: var(--accent); font-weight: 600; }
 .skill-item .muted { font-size: 12px; }
+
+.tag-chips { display: flex; gap: 4px; padding: 4px 10px 8px; flex-wrap: wrap; }
+.tag-chips.wrap { padding: 0; }
+.tag-chip { font-size: 11px; line-height: 16px; padding: 0 7px; border-radius: 9px; cursor: pointer; color: var(--tc); background: color-mix(in srgb, var(--tc) 14%, transparent); border: 1px solid color-mix(in srgb, var(--tc) 35%, transparent); }
+.tag-chip.on { background: color-mix(in srgb, var(--tc) 35%, transparent); }
+.tag-chip.dim { opacity: 0.7; }
+.tag-count { opacity: 0.6; }
+.tag-bar { display: flex; flex-wrap: wrap; gap: 4px; max-width: 60vw; align-items: center; }
