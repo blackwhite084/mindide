@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Task } from "../../server/types.ts";
 import { client, type ClientState } from "./client.ts";
+import { AskForm } from "./AskForm.tsx";
 import { ui } from "./ui.ts";
 
 const STATUS: Record<Task["status"], string> = {
@@ -32,6 +33,7 @@ function TaskCard({ task }: { task: Task }) {
                     <span className="act-dot" />
                     <span className="act-label">{a.label}</span>
                   </div>
+                  {a.ask && <AskForm id={a.id} ask={a.ask} live={task.status === "running" && a.status === "running"} />}
                 </div>
               ))}
             </div>

@@ -37,6 +37,7 @@ ${CANVAS_RULES}
 - 用户选中的节点是当前关注点，新内容默认挂在它下面。
 - 需要最新信息或核实事实时，用 web_search 联网搜索（必要时 web_fetch 读原文），把来源链接写进节点正文。
 - 耗时较长的深入调研或大规模整理，用 dispatch_task 派给后台 agent。
+- 需求有歧义、有几个方向需要用户拍板时，用 ask_user 提问（可以一次问几个问题并给出候选项），拿到回答再动手；能合理假设的小事不要问。
 - 用户提供了参考资料（文件、代码库目录）时，用 source_search 定位、source_read 阅读、source_tree 看目录结构，需要时用 source_bash 执行查看命令（如 git log、wc -l），结论写进节点并注明出处（文件名:行号 或 页码）。不要凭空猜测资料内容。
 - 用中文，直接、紧凑。用户可能在你工作时继续追加或插入消息，请自然衔接。`;
 
@@ -47,6 +48,7 @@ ${CANVAS_RULES}
 - 先用 canvas_list / canvas_read 了解现状，再动手。
 - 需要最新信息或核实事实时，用 web_search 联网搜索（必要时 web_fetch 读原文），把来源链接写进节点正文。
 - 用户提供了参考资料时，用 source_search / source_read 查阅，并注明出处。
+- 只有必须由用户决定的问题才用 ask_user 提问（用户可能不在跟前，提问会让任务停下来等待）。
 - 成果直接用工具写进白板；最终回答只用两三句话总结你做了什么。`;
 
 let runtimePromise: Promise<ModelRuntime> | undefined;
@@ -159,6 +161,11 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
     case "dispatch_task":
       label = `派发任务「${args?.title ?? ""}」`;
       break;
+    case "ask_user": {
+      const questions = Array.isArray(args?.questions) ? args.questions.filter((q: any) => q?.question) : [];
+      label = questions.length ? `提问：${questions.map((q: any) => q.header || q.question).join("、")}` : "提问…";
+      return { id, tool, label, status: "running", ask: { questions } };
+    }
     case "source_list":
       label = "查看资料清单";
       break;
@@ -201,6 +208,8 @@ function finishActivity(list: Activity[], e: { toolCallId: string; isError: bool
           status: e.isError ? ("error" as const) : ("done" as const),
           detail: resultText(e.result),
           nodeId: e.result?.details?.nodeId ?? a.nodeId,
+          // 记下回答；出错（被中止）时为 null
+          ...(a.ask ? { ask: { ...a.ask, answers: e.result?.details?.answers ?? null } } : {}),
         }
       : a,
   );
@@ -210,8 +219,14 @@ function upsertActivity(list: Activity[], a: Activity): Activity[] {
   const i = list.findIndex((x) => x.id === a.id);
   if (i < 0) return [...list, a];
   const prev = list[i];
-  if (prev.label === a.label && prev.nodeId === a.nodeId && prev.status === a.status) return list;
+  const sameAsk = JSON.stringify(prev.ask?.questions) === JSON.stringify(a.ask?.questions);
+  if (prev.label === a.label && prev.nodeId === a.nodeId && prev.status === a.status && sameAsk) return list;
   return list.map((x, j) => (j === i ? { ...prev, ...a } : x));
+}
+
+/** 用户没回答提问就发了新消息：当作跳过，让 agent 接着处理新消息 */
+function skipAsks(store: BoardStore, list: Activity[] | undefined) {
+  for (const a of list ?? []) if (a.ask && a.status === "running") store.answerAsk(a.id, null);
 }
 
 /** 从流式事件里取出正在生成的工具调用 */
@@ -275,6 +290,7 @@ export class MainAgent {
   chat(text: string, mode: "queue" | "steer", contextNodeIds: string[]) {
     const prompt = this.composePrompt(text, contextNodeIds);
     this.pending.set(prompt, { text, contextNodeIds });
+    if (this.session.isStreaming && this.aiEntry) skipAsks(this.store, this.store.getChat(this.aiEntry)?.activity);
     const run = this.session.isStreaming
       ? this.session.prompt(prompt, { streamingBehavior: mode === "steer" ? "steer" : "followUp" })
       : this.session.prompt(prompt);
@@ -549,6 +565,7 @@ export class TaskRunner {
     if (!session || !task) return;
     task.log += `\n\n> 👤 ${text}\n\n`;
     this.store.upsertTask(task);
+    skipAsks(this.store, task.activity);
     if (session.isStreaming) session.steer(text);
     else {
       task.status = "running";

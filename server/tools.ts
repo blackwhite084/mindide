@@ -52,6 +52,50 @@ function mustGroup(ctx: ToolContext, id: string) {
 }
 
 export function createCanvasTools(ctx: ToolContext) {
+  /** 向用户提问，等用户在对话里回答后才返回 */
+  const askUser = () =>
+    defineTool({
+      name: "ask_user",
+      label: "提问",
+      description:
+        "向用户提问并等待回答：需求有歧义、有几个方向需要用户拍板、缺少只有用户知道的信息时使用。" +
+        "一次可以问 1~4 个问题，每个问题可以给 2~4 个候选项（单选或多选），用户也总能自己输入回答；没有合适候选项时省略 options，让用户直接输入。" +
+        "能合理假设的小事不要问，直接做。",
+      parameters: Type.Object({
+        questions: Type.Array(
+          Type.Object({
+            question: Type.String({ description: "完整的问题，以问号结尾" }),
+            header: Type.Optional(Type.String({ description: "很短的标签，≤ 6 字，如「方向」「范围」" })),
+            options: Type.Optional(
+              Type.Array(
+                Type.Object({
+                  label: Type.String({ description: "候选项，1~8 字" }),
+                  description: Type.Optional(Type.String({ description: "这个选项意味着什么、有什么取舍" })),
+                }),
+                { description: "2~4 个互斥的候选项（多选时可以不互斥）；不用自己加「其他」，用户总能自己输入" },
+              ),
+            ),
+            multiSelect: Type.Optional(Type.Boolean({ description: "允许多选" })),
+          }),
+          { minItems: 1, maxItems: 4 },
+        ),
+      }),
+      execute: async (toolCallId, { questions }, signal) => {
+        const answers = await ctx.store.waitAnswer(toolCallId, signal);
+        const text = answers
+          ? "用户的回答：\n" +
+            questions
+              .map((q, i) => {
+                const a = answers[i];
+                const parts = [...(a?.selected ?? []), ...(a?.text?.trim() ? [a.text.trim()] : [])];
+                return `${i + 1}. ${q.question}\n   → ${parts.length ? parts.join("；") : "（未回答）"}`;
+              })
+              .join("\n")
+          : "用户跳过了这些问题，请按你的判断继续。";
+        return { content: [{ type: "text" as const, text }], details: { answers } };
+      },
+    });
+
   const list = defineTool({
     name: "canvas_list",
     label: "查看白板",
@@ -274,7 +318,7 @@ export function createCanvasTools(ctx: ToolContext) {
     },
   });
 
-  const tools = [list, read, create, createWidget, edit, move, del, link, unlink, group, ungroup];
+  const tools = [list, read, create, createWidget, edit, move, del, link, unlink, group, ungroup, askUser()];
 
   if (ctx.dispatch) {
     const dispatch = ctx.dispatch;

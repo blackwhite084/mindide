@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStor
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Activity, BoardNode, ChatEntry } from "../../server/types.ts";
+import { AskForm } from "./AskForm.tsx";
 import { client, type ClientState } from "./client.ts";
 import { ago } from "./TopbarMenus.tsx";
 import { ui } from "./ui.ts";
@@ -25,8 +26,19 @@ function Thinking({ text, live }: { text: string; live: boolean }) {
   );
 }
 
-function ActivityRow({ a }: { a: Activity }) {
+function ActivityRow({ a, live }: { a: Activity; live: boolean }) {
   const [open, setOpen] = useState(false);
+  if (a.ask) {
+    return (
+      <div className={`act ${a.status}`}>
+        <div className="act-row">
+          <span className="act-dot" />
+          <span className="act-label">{a.label}</span>
+        </div>
+        <AskForm id={a.id} ask={a.ask} live={live && a.status === "running"} />
+      </div>
+    );
+  }
   return (
     <div className={`act ${a.status} ${a.nodeId ? "linkable" : ""}`}>
       <div
@@ -77,7 +89,7 @@ const Entry = memo(function Entry({ entry, nodes }: { entry: ChatEntry; nodes?: 
       {!!entry.activity?.length && (
         <div className="activity">
           {entry.activity.map((a) => (
-            <ActivityRow key={a.id} a={a} />
+            <ActivityRow key={a.id} a={a} live={!!entry.streaming} />
           ))}
         </div>
       )}

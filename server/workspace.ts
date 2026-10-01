@@ -175,6 +175,9 @@ export class Workspace {
       case "queue:clear":
         main.clearQueue();
         break;
+      case "ask:answer":
+        store.answerAsk(msg.id, msg.answers);
+        break;
       case "chat:new":
         if (!store.board.chat.length) break;
         await this.leaveConversation();

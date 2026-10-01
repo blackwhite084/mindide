@@ -225,6 +225,39 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
   background: var(--bg); border-radius: 6px; padding: 6px 8px; color: var(--muted);
 }
 
+/* ask_user 提问 */
+.ask {
+  margin: 4px 0 6px 13px; padding: 10px; display: flex; flex-direction: column; gap: 12px;
+  background: var(--node); border: 1px solid var(--line-2); border-radius: 8px; font-size: 13px;
+}
+.act.running .ask:not(.done) { border-color: var(--accent); }
+.ask.done { gap: 8px; padding: 8px 10px; font-size: 12.5px; }
+.ask-item { display: flex; flex-direction: column; gap: 6px; }
+.ask-q { color: var(--text); line-height: 1.5; }
+.ask-tag {
+  display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 8px; font-size: 11px;
+  background: rgba(122, 162, 247, 0.12); color: var(--accent); vertical-align: 1px;
+}
+.ask-a { color: var(--ai); margin-top: 2px; }
+.ask-options { display: flex; flex-direction: column; gap: 4px; }
+.ask-opt {
+  display: flex; align-items: flex-start; gap: 8px; text-align: left; padding: 6px 8px;
+  background: var(--bg); border-color: var(--line);
+}
+.ask-opt.on { border-color: var(--accent); background: rgba(122, 162, 247, 0.1); }
+.ask-mark { flex: none; width: 12px; height: 12px; margin-top: 4px; border: 1.5px solid var(--line-2); }
+.ask-mark.radio { border-radius: 50%; }
+.ask-mark.check { border-radius: 3px; }
+.ask-opt.on .ask-mark { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 2px var(--bg); }
+.ask-opt-main { display: flex; flex-direction: column; min-width: 0; }
+.ask-opt-label { color: var(--text); }
+.ask-opt-desc { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.ask-input {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; outline: none;
+}
+.ask-input:focus { border-color: var(--accent); }
+.ask-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
 /* ---------- 输入框 ---------- */
 .composer {
   position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);

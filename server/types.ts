@@ -11,6 +11,29 @@ export interface Activity {
   detail?: string;
   /** 该操作涉及的节点，点击可定位 */
   nodeId?: string;
+  /** ask_user：向用户提的问题和用户的回答 */
+  ask?: AskState;
+}
+
+export interface AskQuestion {
+  question: string;
+  /** 很短的标签 */
+  header?: string;
+  /** 候选项；没有时用户直接输入 */
+  options?: { label: string; description?: string }[];
+  multiSelect?: boolean;
+}
+
+/** 一个问题的回答：选中的候选项 + 自己输入的内容 */
+export interface AskAnswer {
+  selected: string[];
+  text?: string;
+}
+
+export interface AskState {
+  questions: AskQuestion[];
+  /** undefined：还没回答；null：跳过 / 取消 */
+  answers?: AskAnswer[] | null;
 }
 
 export type EditField = "md" | "summary";
@@ -216,6 +239,8 @@ export type ClientMsg =
   | { type: "chat"; text: string; mode: "queue" | "steer"; contextNodeIds: string[] }
   | { type: "abort" }
   | { type: "queue:clear" }
+  /** 回答 ask_user 的提问（id 是工具调用 id）；answers 为 null 表示跳过 */
+  | { type: "ask:answer"; id: string; answers: AskAnswer[] | null }
   /** 新开一个对话（白板内容不变，AI 从空上下文开始） */
   | { type: "chat:new" }
   | { type: "chat:open"; id: string }

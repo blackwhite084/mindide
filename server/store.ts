@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
-import type { Board, BoardEdge, BoardGroup, BoardNode, ChatEntry, EdgePatch, EditField, GroupPatch, ServerMsg, Task } from "./types.ts";
+import type { AskAnswer, Board, BoardEdge, BoardGroup, BoardNode, ChatEntry, EdgePatch, EditField, GroupPatch, ServerMsg, Task } from "./types.ts";
 import { codeHash } from "./widget.ts";
 
 type Listener = (msg: ServerMsg) => void;
@@ -426,6 +426,40 @@ export class BoardStore {
       }, timeoutMs);
       this.widgetWaiters.add(check);
       check();
+    });
+  }
+
+  // ---------- ask_user 的回答（不持久化） ----------
+
+  private askWaiters = new Map<string, (answers: AskAnswer[] | null) => void>();
+  /** 工具开始执行前就收到的回答（流式生成时问题已经显示出来了） */
+  private earlyAnswers = new Map<string, AskAnswer[] | null>();
+
+  answerAsk(id: string, answers: AskAnswer[] | null) {
+    const fn = this.askWaiters.get(id);
+    if (fn) fn(answers);
+    else this.earlyAnswers.set(id, answers);
+  }
+
+  /** 等用户回答（id 是工具调用 id）；中止时抛错 */
+  waitAnswer(id: string, signal?: AbortSignal) {
+    return new Promise<AskAnswer[] | null>((resolve, reject) => {
+      if (this.earlyAnswers.has(id)) {
+        const early = this.earlyAnswers.get(id)!;
+        this.earlyAnswers.delete(id);
+        return resolve(early);
+      }
+      const onAbort = () => {
+        this.askWaiters.delete(id);
+        reject(new Error("提问已取消"));
+      };
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener("abort", onAbort, { once: true });
+      this.askWaiters.set(id, (answers) => {
+        this.askWaiters.delete(id);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(answers);
+      });
     });
   }
 
