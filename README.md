@@ -2,6 +2,8 @@
 
 高频 AI 思考板：面向内容的思维导图画布（对话过程在侧栏） + 可排队/插话的对话 + 后台 agent 调度 + 版本分支树。AI 层基于 [pi](https://github.com/badlogic/pi-mono) SDK（`@earendil-works/pi-coding-agent`），模型沿用 `~/.pi/agent` 的配置。
 
+![AI Minder 运行截图](pic.png)
+
 ```bash
 npm install
 npm run dev        # 开发：http://localhost:5173
