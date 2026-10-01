@@ -13,7 +13,7 @@ const STATUS: Record<Task["status"], string> = {
   aborted: "已停止",
 };
 
-function TaskCard({ task }: { task: Task }) {
+export function TaskCard({ task }: { task: Task }) {
   const [open, setOpen] = useState(task.status === "running");
   const [msg, setMsg] = useState("");
   return (
@@ -69,45 +69,5 @@ function TaskCard({ task }: { task: Task }) {
         </div>
       )}
     </div>
-  );
-}
-
-export function TaskPanel({ state, selected }: { state: ClientState; selected: string[] }) {
-  const [text, setText] = useState("");
-  const tasks = [...state.tasks.values()].sort((a, b) => b.createdAt - a.createdAt);
-
-  const create = () => {
-    if (!text.trim()) return;
-    client.send({ type: "task:create", instructions: text.trim(), contextNodeIds: selected });
-    setText("");
-  };
-
-  return (
-    <>
-      <div className="task-new">
-        <textarea
-          rows={3}
-          value={text}
-          placeholder="交给后台 agent 做什么？比如：调研竞品定价、把关于定价的讨论归纳成一个节点"
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) create();
-          }}
-        />
-        <div className="task-new-foot">
-          <span className="muted">{selected.length ? `附带 ${selected.length} 个选中节点` : "可先在白板上选中节点作为上下文"}</span>
-          <button className="primary" onClick={create} disabled={!text.trim()}>
-            派发
-          </button>
-        </div>
-      </div>
-      <div className="task-list">
-        {tasks.length === 0 && <div className="empty">还没有任务。也可以直接在对话里让 AI「派个 agent 去…」</div>}
-        {tasks.map((t) => (
-          <TaskCard key={t.id} task={t} />
-        ))}
-      </div>
-    </>
   );
 }

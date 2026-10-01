@@ -11,7 +11,7 @@ import { FileMenu } from "./FileMenu.tsx";
 import { SearchPalette } from "./SearchPalette.tsx";
 import { SourcesPanel } from "./SourcesPanel.tsx";
 import { BoardSwitcher, ModelMenu, NewBoardButton } from "./TopbarMenus.tsx";
-import { TaskPanel } from "./TaskPanel.tsx";
+import { OutlinePanel } from "./OutlinePanel.tsx";
 import { VersionPanel } from "./VersionPanel.tsx";
 
 function Shell() {
@@ -19,7 +19,7 @@ function Shell() {
   const [selected, setSelected] = useState<string[]>([]);
   const [follow, setFollow] = useState(() => localStorage.getItem("follow") !== "0");
   const [panel, setPanel] = useState(true);
-  const [tab, setTab] = useState<"chat" | "tasks" | "sources" | "versions">("chat");
+  const [tab, setTab] = useState<"chat" | "outline" | "sources" | "versions">("chat");
   const [detail, setDetail] = useState<"summary" | "full">(() =>
     localStorage.getItem("detail") === "full" ? "full" : "summary",
   );
@@ -149,8 +149,8 @@ function Shell() {
             <button className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
               对话
             </button>
-            <button className={tab === "tasks" ? "on" : ""} onClick={() => setTab("tasks")}>
-              调度板{running > 0 && <span className="pill">{running}</span>}
+            <button className={tab === "outline" ? "on" : ""} onClick={() => setTab("outline")}>
+              大纲{running > 0 && <span className="pill">{running}</span>}
             </button>
             <button className={tab === "sources" ? "on" : ""} onClick={() => setTab("sources")}>
               资料{state.sources.length > 0 && <span className="count">{state.sources.length}</span>}
@@ -160,7 +160,7 @@ function Shell() {
             </button>
           </div>
           {tab === "chat" && <ChatPanel state={state} />}
-          {tab === "tasks" && <TaskPanel state={state} selected={selected} />}
+          {tab === "outline" && <OutlinePanel state={state} />}
           {tab === "sources" && <SourcesPanel state={state} />}
           {tab === "versions" && <VersionPanel state={state} />}
         </aside>
