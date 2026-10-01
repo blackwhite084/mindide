@@ -62,6 +62,8 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   const [altHeld, setAltHeld] = useState(false);
   const followRef = useRef(follow);
   followRef.current = follow;
+  /** 用户在 AI 工作期间手动移动 / 缩放过画布：本轮不再自动居中，播完后恢复 */
+  const userMovedRef = useRef(false);
 
   const nodes = useMemo(() => [...state.nodes.values()], [state.nodes]);
   // AI 正在准备修改的节点（工具参数还在生成中）。
@@ -112,7 +114,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
   /** 节点不在视野内时平滑移过去；已经可见就不动镜头 */
   const ensureVisible = useCallback(
     async (id: string, force = false) => {
-      if (!followRef.current && !force) return;
+      if (!force && (!followRef.current || userMovedRef.current)) return;
       // 在折叠的分支里：先展开祖先
       let root = client.state.nodes.get(id);
       for (let n = root; n?.parentId; n = client.state.nodes.get(n.parentId)) {
@@ -144,6 +146,9 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
 
   useEffect(() => {
     animator.focus = (id) => ensureVisible(id);
+    animator.onIdle = () => {
+      userMovedRef.current = false;
+    };
     ui.focusNode = (id) => {
       setRfNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
       onSelectionChange([id]);
@@ -679,6 +684,10 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
       onNodesDelete={(ns) => ns.filter((n) => !isGroup(n)).forEach((n) => client.send({ type: "node:delete", id: n.id }))}
       onEdgesDelete={(es) => es.filter((e) => !e.id.startsWith("t-")).forEach((e) => client.send({ type: "edge:delete", id: e.id }))}
       onConnect={(c) => c.source && c.target && client.send({ type: "edge:add", source: c.source, target: c.target })}
+      onMoveStart={(e) => {
+        // 只有用户操作才带事件；setCenter / fitView 触发的没有
+        if (e) userMovedRef.current = true;
+      }}
       zoomOnDoubleClick={false}
       deleteKeyCode={["Backspace", "Delete"]}
       multiSelectionKeyCode={["Meta", "Shift"]}

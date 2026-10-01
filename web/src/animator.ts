@@ -67,6 +67,8 @@ class Animator {
   private generation = 0;
   /** 播放前把镜头移到节点（由画布注册） */
   focus: ((nodeId: string) => Promise<void>) | undefined;
+  /** 队列播完时通知（由画布注册） */
+  onIdle: (() => void) | undefined;
   speed = 1;
 
   subscribe = (fn: () => void) => {
@@ -137,6 +139,7 @@ class Animator {
       }
     }
     this.running = false;
+    this.onIdle?.();
   }
 
   private async play({ nodeId, changes, by, mode }: Job) {
