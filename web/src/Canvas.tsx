@@ -238,6 +238,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           data,
           style: g.fold ? {} : { width, height },
           dragHandle: ".group-head",
+          className: g.fold ? undefined : "group-open",
           selectable: false,
           deletable: false,
           connectable: false,

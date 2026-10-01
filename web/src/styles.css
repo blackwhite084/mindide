@@ -627,6 +627,9 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
   transition: transform 0.38s cubic-bezier(0.2, 0.7, 0.2, 1), width 0.25s ease, height 0.25s ease;
 }
 .react-flow__node-group.dragging { transition: none; }
+/* 展开的分组只有标题栏响应鼠标，空白处让给画布，才能拖动平移 */
+.react-flow__node-group.group-open { pointer-events: none !important; }
+.react-flow__node-group.group-open .group-head { pointer-events: auto; }
 .groupnode {
   --c: var(--line-2);
   height: 100%;
