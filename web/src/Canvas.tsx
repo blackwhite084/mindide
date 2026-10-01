@@ -389,6 +389,7 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           depth,
           color: colorOf(layout.branch.get(id) ?? -1),
           childCount: layout.childCount.get(id) ?? 0,
+          order: layout.seq.get(id),
           detail,
           dropTarget: dropTarget === id,
           pending: pendingShown.has(id),
@@ -492,6 +493,17 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
     const selected = rf.getNodes().filter((x) => x.selected).map((x) => x.id);
     const multi = selected.length > 1 && selected.includes(id);
     const gid = layout.region.get(id);
+    // 有序父节点下的同级（按序号排）：菜单里可以上移 / 下移
+    const parentOrdered = !!n.parentId && !!client.state.nodes.get(n.parentId)?.ordered;
+    const sibs = parentOrdered
+      ? [...client.state.nodes.values()].filter((x) => x.parentId === n.parentId).sort((a, b) => (layout.seq.get(a.id) ?? Infinity) - (layout.seq.get(b.id) ?? Infinity) || a.createdAt - b.createdAt)
+      : [];
+    const sibIdx = sibs.findIndex((x) => x.id === id);
+    const moveInOrder = (d: -1 | 1) => {
+      const ids = sibs.map((x) => x.id);
+      [ids[sibIdx], ids[sibIdx + d]] = [ids[sibIdx + d]!, ids[sibIdx]!];
+      client.send({ type: "children:reorder", id: n.parentId!, ids });
+    };
     const groupItems: MenuItem[] = [
       { label: "放进新分组", hint: "⌘G", onClick: () => client.createGroup([id]) },
       ...groupList
@@ -556,6 +568,21 @@ export function Canvas({ state, follow, detail, onSelectionChange }: Props) {
           { label: "标签…", onClick: () => ui.openMenu({ x: e.clientX, y: e.clientY, items: [], form: <TagForm ids={[id]} /> }) },
           { label: "添加子节点", hint: "Tab", onClick: () => client.createNode(id) },
           { label: "添加同级节点", hint: "⇧Tab", onClick: () => createSibling(n) },
+          ...((layout.childCount.get(id) ?? 0) > 1 || n.ordered
+            ? [
+                {
+                  label: n.ordered ? "子节点：有序（点击改为无序）" : "子节点：无序（点击改为有序）",
+                  hint: n.ordered ? "1 2 3" : "多列",
+                  onClick: () => client.patchNode(id, { ordered: !n.ordered }),
+                },
+              ]
+            : []),
+          ...(parentOrdered
+            ? [
+                ...(sibIdx > 0 ? [{ label: "在同级中上移", onClick: () => moveInOrder(-1) }] : []),
+                ...(sibIdx >= 0 && sibIdx < sibs.length - 1 ? [{ label: "在同级中下移", onClick: () => moveInOrder(1) }] : []),
+              ]
+            : []),
           ...(n.pinned ? [{ label: "恢复自动排版", onClick: () => client.patchNode(id, { pinned: false }) }] : []),
           ...(n.parentId ? [{ label: "变成独立主题", onClick: () => client.patchNode(id, { parentId: null }) }] : []),
           { sep: true },

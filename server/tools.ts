@@ -43,6 +43,10 @@ const SIDE_DESC =
   "放在父节点的哪一边：left 左边、right 右边、bottom 下边（在父节点正下方，适合补充说明、结论或总结）；" +
   "省略时跟随父节点的展开方向（默认向右）。子树会沿这个方向继续展开。适合把正反两面、对立方案分在左右两边。";
 
+const ORDERED_DESC =
+  "这个节点的子节点是否有先后顺序：true 有序（步骤、流程、排名、时间线、分阶段——顺序本身是信息，会显示序号并保持次序）；" +
+  "false 无序（分类、候选项、要点罗列、标签——会铺成多列卡片墙）。默认无序，只有确有先后关系时才设 true。有序时按创建顺序依次新建子节点即可，不要在标题里自己写序号。";
+
 const TAGS_DESC = "标签：自由文本的短标记（状态、类型、优先级……），不带 #；优先复用白板上已有的标签";
 
 function parentOf(ctx: ToolContext, parentId: string | null | undefined) {
@@ -160,15 +164,16 @@ export function createCanvasTools(ctx: ToolContext) {
       md: Type.String({ description: "正文 Markdown，可展开查看；没有更多细节时可以为空" }),
       tags: Type.Optional(Type.Array(Type.String(), { description: TAGS_DESC })),
       side: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("bottom")], { description: SIDE_DESC })),
+      ordered: Type.Optional(Type.Boolean({ description: ORDERED_DESC })),
     }),
-    execute: async (toolCallId, { title, summary, md, parentId, tags, side }) => {
+    execute: async (toolCallId, { title, summary, md, parentId, tags, side, ordered }) => {
       const parent = parentOf(ctx, parentId);
       const draftId = ctx.claimDraft?.(toolCallId);
       if (draftId) {
-        ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false, ...(tags ? { tags } : {}), ...(side ? { side } : {}) });
+        ctx.store.updateNode(draftId, { title, summary, md, parentId: parent, draft: false, ...(tags ? { tags } : {}), ...(side ? { side } : {}), ...(ordered ? { ordered } : {}) });
         return result(`已创建节点 ${draftId}`, draftId);
       }
-      const node = ctx.store.createNode({ title, summary, md, parentId: parent, ...topicPlace(ctx, parent), tags, side }, true);
+      const node = ctx.store.createNode({ title, summary, md, parentId: parent, ...topicPlace(ctx, parent), tags, side, ordered: ordered || undefined }, true);
       return result(`已创建节点 ${node.id}`, node.id);
     },
   });
@@ -218,9 +223,11 @@ export function createCanvasTools(ctx: ToolContext) {
           description: SIDE_DESC + " auto 表示清除设置。",
         }),
       ),
+      ordered: Type.Optional(Type.Boolean({ description: ORDERED_DESC })),
     }),
-    execute: async (_id, { id, edits, md, title, summary, addTags, removeTags, side }) => {
+    execute: async (_id, { id, edits, md, title, summary, addTags, removeTags, side, ordered }) => {
       const node = must(ctx, id);
+      if (ordered !== undefined && ordered !== !!node.ordered) ctx.store.updateNode(node.id, { ordered });
       if (side) ctx.store.updateNode(node.id, { side, ...(node.pinned ? { pinned: false } : {}) });
       if (addTags?.length || removeTags?.length) ctx.store.addRemoveTags(node.id, addTags, removeTags);
       let next = md ?? node.md;
@@ -263,6 +270,25 @@ export function createCanvasTools(ctx: ToolContext) {
       }
       ctx.store.updateNode(node.id, { parentId: target, ...(side ? { side } : {}) });
       return result(`已移动节点 ${node.id}`, node.id);
+    },
+  });
+
+  const reorder = defineTool({
+    name: "canvas_reorder_children",
+    label: "调整顺序",
+    description:
+      "调整一个节点的子节点次序（会把它设为有序，显示序号）。用于步骤、流程、排名等顺序有意义的子节点。ids 按新的先后顺序列出子节点 id，没列出的排在最后。无序的分类 / 罗列不要用它。",
+    parameters: Type.Object({
+      id: Type.String({ description: "父节点 id" }),
+      ids: Type.Array(Type.String(), { description: "子节点 id，按新的先后顺序" }),
+    }),
+    execute: async (_id, { id, ids }) => {
+      const node = must(ctx, id);
+      const resolved = ids.map((i) => must(ctx, i).id);
+      const bad = resolved.find((i) => ctx.store.get(i)?.parentId !== node.id);
+      if (bad) throw new Error(`节点 ${bad} 不是 ${node.id} 的子节点`);
+      const order = ctx.store.reorderChildren(node.id, resolved) ?? [];
+      return result(`已调整顺序：${order.map((c) => c.id).join(" → ")}`, node.id);
     },
   });
 
@@ -411,7 +437,7 @@ export function createCanvasTools(ctx: ToolContext) {
     },
   });
 
-  const tools = [list, read, create, createWidget, edit, move, del, link, unlink, group, ungroup, subboard, askUser()];
+  const tools = [list, read, create, createWidget, edit, move, reorder, del, link, unlink, group, ungroup, subboard, askUser()];
 
   if (ctx.dispatch) {
     const dispatch = ctx.dispatch;

@@ -76,6 +76,10 @@ export interface BoardNode {
   draft?: boolean;
   /** 布局提示：放在父节点的哪一边（只对有父节点的节点有效） */
   side?: NodeSide;
+  /** 子节点有序（步骤、排名、时间线……）：显示序号、按 seq 排列；默认无序，子节点按多列铺开 */
+  ordered?: boolean;
+  /** 在有序父节点的子节点里的次序（越小越靠前）；没有的排在最后，按创建时间 */
+  seq?: number;
   /** 自定义标签：可以标记为任何东西（状态、类型、用户的偏好……），用于筛选和定位 */
   tags?: string[];
   /** 顶层分列时在第几列（只对根节点有效）；AI 一轮结束时定下来，之后手动编辑不再重排 */
@@ -224,7 +228,7 @@ export interface VersionMeta {
 }
 
 export type NodePatch = Partial<
-  Pick<BoardNode, "title" | "summary" | "md" | "x" | "y" | "pinned" | "open" | "fold" | "parentId" | "tags" | "col">
+  Pick<BoardNode, "title" | "summary" | "md" | "x" | "y" | "pinned" | "open" | "fold" | "parentId" | "tags" | "col" | "ordered" | "seq">
 > & {
   /** auto：清除设置，跟随父级 */
   side?: NodeSide | "auto";
@@ -277,6 +281,8 @@ export type ClientMsg =
   /** scope：新主题所在的子白板（有 groupId 时跟随分组） */
   | { type: "node:create"; id: string; parentId: string | null; x?: number; y?: number; groupId?: string; scope?: string | null }
   | { type: "node:delete"; id: string }
+  /** 按给定顺序重排有序节点的子节点 */
+  | { type: "children:reorder"; id: string; ids: string[] }
   | { type: "node:revert"; id: string }
   | { type: "edge:add"; source: string; target: string }
   | { type: "edge:update"; id: string; patch: EdgePatch }

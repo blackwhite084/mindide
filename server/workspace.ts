@@ -9,6 +9,7 @@ import { LEGACY_CONVERSATION, VersionTree } from "./versions.ts";
 
 const MANUAL = new Set([
   "node:update",
+  "children:reorder",
   "node:create",
   "node:delete",
   "node:revert",
@@ -204,6 +205,9 @@ export class Workspace {
         break;
       case "node:update":
         store.updateNode(msg.id, msg.patch);
+        break;
+      case "children:reorder":
+        store.reorderChildren(msg.id, msg.ids);
         break;
       case "node:create":
         if (store.get(msg.id)) break;

@@ -68,7 +68,8 @@ export class BoardStore {
   }
 
   children(id: string | null) {
-    return this.board.nodes.filter((n) => n.parentId === id);
+    const list = this.board.nodes.filter((n) => n.parentId === id);
+    return id && this.get(id)?.ordered ? list.sort(byOrder) : list;
   }
 
   /** 所在主题（根节点） */
@@ -192,8 +193,23 @@ export class BoardStore {
       if (!("groupId" in patch)) patch.groupId = groupBefore;
       if (!("scope" in patch)) patch.scope = scopeBefore;
     }
+    const wasOrdered = !!node.ordered;
     Object.assign(node, patch, { updatedAt: Date.now() });
     if (!isSide(node.side)) delete node.side;
+    if (!node.ordered) {
+      delete node.ordered;
+      for (const c of this.children(id)) {
+        if (c.seq === undefined) continue;
+        delete c.seq;
+        this.emit({ type: "node:upsert", node: c });
+      }
+    } else if (!wasOrdered) {
+      // 刚改成有序：按现在的先后固定下来
+      this.children(id).sort(byOrder).forEach((c, i) => {
+        c.seq = i;
+        this.emit({ type: "node:upsert", node: c });
+      });
+    }
     if (node.tags && !node.tags.length) delete node.tags;
     if (!node.subboard) delete node.subboard;
     if (node.parentId || !node.groupId || !this.getGroup(node.groupId)) delete node.groupId;
@@ -205,6 +221,22 @@ export class BoardStore {
     }
     this.emit({ type: "node:upsert", node });
     return node;
+  }
+
+  /** 按给定顺序重排有序节点的子节点（没列出的排在后面）；返回新的次序 */
+  reorderChildren(id: string, ids: string[]) {
+    const node = this.get(id);
+    if (!node) return;
+    const kids = this.children(id).sort(byOrder);
+    const first = ids.map((i) => kids.find((c) => c.id === i)).filter((c): c is BoardNode => !!c);
+    const rest = kids.filter((c) => !first.includes(c));
+    [...new Set([...first, ...rest])].forEach((c, i) => {
+      if (c.seq === i) return;
+      c.seq = i;
+      this.emit({ type: "node:upsert", node: c });
+    });
+    if (!node.ordered) this.updateNode(id, { ordered: true });
+    return this.children(id).sort(byOrder);
   }
 
   private unpinDescendants(id: string) {
@@ -700,6 +732,9 @@ export class BoardStore {
   }
 }
 
+/** 有序子节点的次序：先按 seq，没有 seq 的（新加的）排在后面按创建时间 */
+const byOrder = (a: BoardNode, b: BoardNode) => (a.seq ?? Infinity) - (b.seq ?? Infinity) || a.createdAt - b.createdAt;
+
 const isSide = (s: unknown): s is "left" | "right" | "bottom" => s === "left" || s === "right" || s === "bottom";
 
 export function normalizeTags(tags: readonly string[]): string[] {
@@ -712,7 +747,7 @@ export function normalizeTags(tags: readonly string[]): string[] {
 }
 
 const SIDE_TEXT = { left: "{左}", right: "{右}", bottom: "{下}" };
-const tagText = (n: BoardNode) => (n.parentId && n.side ? ` ${SIDE_TEXT[n.side]}` : "") + (n.tags?.length ? " " + n.tags.map((t) => `#${t}`).join(" ") : "");
+const tagText = (n: BoardNode) => (n.ordered ? " {子节点有序}" : "") + (n.parentId && n.side ? ` ${SIDE_TEXT[n.side]}` : "") + (n.tags?.length ? " " + n.tags.map((t) => `#${t}`).join(" ") : "");
 
 function stripUndefined<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;

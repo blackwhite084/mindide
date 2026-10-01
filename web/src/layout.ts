@@ -27,6 +27,8 @@ export interface Layout {
   mirror: Map<string, boolean>;
   /** 顶层的主题（节点 id）和分组（groupKey）实际排在第几列；顶层有固定位置的东西时为空 */
   cols: Map<string, number>;
+  /** 有序父节点下的子节点 → 序号（从 1 开始） */
+  seq: Map<string, number>;
 }
 
 export interface GroupBox {
@@ -44,6 +46,9 @@ const GAP_Y = 14;
 const GAP_ROOT = 90;
 /** 放在下边的节点：与父节点的垂直间距、向内缩进 */
 const GAP_B = 22;
+/** 无序的叶子兄弟铺成多列卡片墙：至少几个才铺、列间距 */
+const WALL_MIN = 5;
+const GAP_WALL = 20;
 export const INDENT = 36;
 /** 同列关系弧线：第一条车道离卡片的距离、车道间距、给文字预留的宽度 */
 export const LANE_BASE = 26;
@@ -193,9 +198,14 @@ export function layoutTree(
     adj.get(e.source)!.add(e.target);
     adj.get(e.target)!.add(e.source);
   }
+  const seq = new Map<string, number>();
   for (const [k, list] of kids) {
     list.sort((a, b) => a.createdAt - b.createdAt);
-    kids.set(k, orderByRelations(list, adj));
+    if (k && byId.get(k)?.ordered) {
+      // 有序：按 seq 排（新加的没有 seq，排在最后），不再按关系线挪动
+      list.sort((a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity) || a.createdAt - b.createdAt);
+      list.forEach((c, i) => seq.set(c.id, i + 1));
+    } else kids.set(k, orderByRelations(list, adj));
   }
 
   const depth = new Map<string, number>();
@@ -210,6 +220,8 @@ export function layoutTree(
   const mirror = new Map<string, boolean>();
   /** 一路向右展开（同一列的卡片 x 对齐，关系线才能用车道） */
   const pure = new Map<string, boolean>();
+  /** 铺成卡片墙的节点 */
+  const wall = new Set<string>();
 
   const visit = (n: BoardNode, d: number, b: number, g: string | undefined) => {
     depth.set(n.id, d);
@@ -226,8 +238,19 @@ export function layoutTree(
       side.set(c.id, s);
       mirror.set(c.id, s === "left" ? true : s === "right" ? false : mir);
       pure.set(c.id, s === "right" && !!pure.get(n.id));
-      visit(c, d + 1, d === 0 ? branchSeq++ : b, g);
     }
+    // 无序且都是叶子的同侧兄弟：铺成多列（不再同列对齐，所以也不走关系线车道）
+    if (!n.ordered) {
+      for (const s of ["right", "left"] as const) {
+        const group = cs.filter((c) => side.get(c.id) === s && !c.pinned);
+        if (group.length < WALL_MIN || !group.every((c) => c.fold || !kids.get(c.id)?.length)) continue;
+        for (const c of group) {
+          wall.add(c.id);
+          pure.set(c.id, false);
+        }
+      }
+    }
+    for (const c of cs) visit(c, d + 1, d === 0 ? branchSeq++ : b, g);
   };
   const roots = kids.get(null) ?? [];
   const groupOf = (r: BoardNode) => (r.groupId && groupById.has(r.groupId) ? r.groupId : undefined);
@@ -312,8 +335,33 @@ export function layoutTree(
       const dy = s.h / 2 - (last.y + size(cs[cs.length - 1]!.id).h) / 2;
       for (const q of placed) add(q.sh, q.x, q.y + dy);
     };
-    column(p.r, () => s.w + gap);
-    column(p.l, (c) => -GAP_X - size(c.id).w);
+    /** 卡片墙：按高度均衡分成几列，各列顶端对齐，整体相对父节点垂直居中 */
+    const masonry = (cs: BoardNode[], dir: 1 | -1) => {
+      const k = cs.length >= 9 ? 3 : 2;
+      const cols = Array.from({ length: k }, () => ({ items: [] as BoardNode[], h: 0, w: 0 }));
+      for (const c of cs) {
+        const col = cols.reduce((a, b) => (b.h < a.h ? b : a));
+        col.h += size(c.id).h + (col.items.length ? GAP_Y : 0);
+        col.w = Math.max(col.w, size(c.id).w);
+        col.items.push(c);
+      }
+      const dy = s.h / 2 - Math.max(...cols.map((c) => c.h)) / 2;
+      let edge = dir === 1 ? s.w + gap : -GAP_X;
+      for (const col of cols) {
+        if (!col.items.length) continue;
+        let y = dy;
+        for (const c of col.items) {
+          // 左边的卡片靠右对齐父节点一侧
+          add(shape(c.id), dir === 1 ? edge : edge - size(c.id).w, y);
+          y += size(c.id).h + GAP_Y;
+        }
+        edge = dir === 1 ? edge + col.w + GAP_WALL : edge - col.w - GAP_WALL;
+      }
+    };
+    if (p.r.length && wall.has(p.r[0]!.id)) masonry(p.r, 1);
+    else column(p.r, () => s.w + gap);
+    if (p.l.length && wall.has(p.l[0]!.id)) masonry(p.l, -1);
+    else column(p.l, (c) => -GAP_X - size(c.id).w);
     // 下边的节点：贴着父节点往下排，同时避开左右两侧已经排好的子树
     let floor = s.h + GAP_B;
     for (const c of p.b) {
@@ -452,5 +500,5 @@ export function layoutTree(
     pos.set(id, { x: p.x + o.x, y: p.y + o.y });
   }
 
-  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region, side, mirror, cols };
+  return { pos, depth, branch, childCount, visible, parent, lanes, groups, region, side, mirror, cols, seq };
 }

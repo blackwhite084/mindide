@@ -27,6 +27,7 @@ const CANVAS_RULES = `白板是一棵（或几棵）思维树，面向内容而�
 - 主题多了（大约 6 个以上）就用 canvas_group 把相关主题分成几个分组，给画面分区；次要的分组可以折叠。主题内部的归类仍然用父子节点，不要用分组。
 - 白板可以嵌套子白板：一张入口卡片，点进去是一块独立的画布（有自己的主题和分组）。某个主题展开得太大、或一组内容自成一块、用户觉得画面太乱时，用 canvas_subboard 收进子白板，主画面只留入口卡片。白板索引里会分段列出每个子白板的内容。
 - 节点默认向右展开；需要时用 side 指定放在父节点的左边 / 下边（如正反方分左右、结论放下边）。不要滥用，大多数节点保持默认。
+- 子节点之间有先后关系（步骤、流程、排名、时间线、分阶段）时，给父节点设 ordered: true，前端会显示序号并保持次序，按先后顺序依次新建子节点；事后调整次序用 canvas_reorder_children。分类、候选项、要点罗列等顺序无关的保持默认（无序），前端会把它们铺成多列卡片墙。不要在标题里自己写「1.」「第一步」之类的序号。
 - 节点可以带标签（tags），用来标记状态、类型或用户的偏好；新建时用 tags，之后用 canvas_edit_node 的 addTags / removeTags 增删，用 canvas_list 的 tag 参数只看某类节点。优先复用白板上已有的标签，不要造近义的新标签；用户手动加的标签要尊重，不要随意移除。
 - 新建前先看白板索引，避免重复，已有的节点就在原处补充或修改。
 - 图表、SVG 插图、结构示意、交互演示、对白板内容的自定义可视化等文字说不清的内容，用 canvas_create_widget 做成组件节点；工具结果会告诉你运行是否报错，报错就修好。`;
@@ -141,6 +142,10 @@ function activityOf(store: BoardStore, id: string, tool: string, args: any): Act
       break;
     case "canvas_move_node":
       label = `调整 ${name(args?.id)} 的位置`;
+      nodeId = args?.id;
+      break;
+    case "canvas_reorder_children":
+      label = `调整 ${name(args?.id)} 的子节点顺序`;
       nodeId = args?.id;
       break;
     case "canvas_delete_node":

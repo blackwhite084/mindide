@@ -16,6 +16,8 @@ export type MdFlowNode = Node<
     depth: number;
     color: string;
     childCount: number;
+    /** 在有序父节点下的序号（从 1 开始） */
+    order?: number;
     detail: "summary" | "full";
     dropTarget: boolean;
     pending: boolean;
@@ -90,7 +92,7 @@ function useFollowActive(ref: React.RefObject<HTMLDivElement | null>, frame: Fra
 }
 
 function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
-  const { node, depth, color, childCount, detail, dropTarget, pending, mirror, dim, related, diff, beforeText, subCards, subTopics, external } = data;
+  const { node, depth, color, childCount, order, detail, dropTarget, pending, mirror, dim, related, diff, beforeText, subCards, subTopics, external } = data;
   const mdFrame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id, "md"));
   const sumFrame = useSyncExternalStore(animator.subscribe, () => animator.frame(node.id, "summary"));
   const frame = mdFrame ?? sumFrame;
@@ -313,6 +315,11 @@ function MdNodeInner({ data, selected }: NodeProps<MdFlowNode>) {
             {widget && <span className="kind widget">组件</span>}
             {node.draft && <span className="kind drafting">AI 正在写</span>}
             {pending && !frame && !node.draft && <span className="kind drafting">AI 准备修改</span>}
+            {order !== undefined && (
+              <span className="order-badge" style={{ background: color }} title="有序：第几个">
+                {order}
+              </span>
+            )}
             <span className="title">{node.title || summary.slice(0, 16) || "未命名"}</span>
             {node.pinned && (
               <button
