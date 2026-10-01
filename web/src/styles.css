@@ -87,6 +87,8 @@ button.ghost:hover { color: var(--text); background: var(--node-2); }
 .react-flow__node { transition: transform 0.38s cubic-bezier(0.2, 0.7, 0.2, 1); }
 .react-flow__node.dragging, .react-flow__node.enter { transition: none; }
 .react-flow__node:has(.float-panel) { z-index: 1000 !important; }
+/* 鼠标移到卡片上时，卡片盖过被抬高到上层的连线 */
+.react-flow__node-md:hover { z-index: 1001 !important; }
 
 .mdnode {
   --c: var(--line-2);
