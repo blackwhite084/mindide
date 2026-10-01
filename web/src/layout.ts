@@ -55,7 +55,75 @@ const GROUP_MIN = { w: 280, h: 90 };
 export const GROUP_FOLDED = { w: 280, h: 92 };
 export const groupKey = (id: string) => `group:${id}`;
 
-export const widthOf = (depth: number) => (depth === 0 ? 320 : depth === 1 ? 290 : 270);
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 子树的形状：[节点, 相对 x, 相对 y] 和所有卡片的矩形（相对子树根节点的左上角） */
+interface Shape {
+  pos: [string, number, number][];
+  rects: Rect[];
+}
+
+/**
+ * 把一组矩形（整体右移 dx）往下放：返回最小的下移量，
+ * 让它和 placed 里横向有交叠的矩形之间都至少隔 GAP_Y，且不小于 floor。
+ */
+function clearBelow(placed: Rect[], rects: Rect[], dx: number, floor: number): number {
+  let y = floor;
+  for (const r of rects) {
+    const x0 = r.x + dx;
+    const x1 = x0 + r.w;
+    for (const a of placed) {
+      if (x0 < a.x + a.w && a.x < x1) y = Math.max(y, a.y + a.h + GAP_Y - r.y);
+    }
+  }
+  return y;
+}
+
+/** 顶层分列：列间距、期望的整体宽高比（接近常见屏幕）、最多几列 */
+const GAP_COL = 160;
+const ASPECT = 16 / 10;
+const MAX_COLS = 6;
+
+/**
+ * 按顺序把顶层的块切成若干列（每列高度尽量接近），
+ * 选整体宽高比最接近 ASPECT 的列数；差不多时列数少的优先。
+ */
+function packColumns<T extends { lo: number; hi: number; h: number }>(items: T[], maxCols: number): T[][] {
+  const total = items.reduce((s, it) => s + it.h + GAP_ROOT, 0) - GAP_ROOT;
+  let best: { cols: T[][]; score: number } | undefined;
+  for (let k = 1; k <= Math.min(maxCols, items.length); k++) {
+    const target = total / k;
+    const cols: T[][] = [];
+    let cur: T[] = [];
+    let h = 0;
+    items.forEach((it, i) => {
+      // 剩下的块不够分给剩下的列时也要换列；超过目标高度一半以上就换列
+      const left = items.length - i;
+      const need = k - cols.length - 1;
+      if (cur.length && (left <= need || h + it.h / 2 > target) && cols.length < k - 1) {
+        cols.push(cur);
+        cur = [];
+        h = 0;
+      }
+      cur.push(it);
+      h += it.h + GAP_ROOT;
+    });
+    if (cur.length) cols.push(cur);
+    const w = cols.reduce((s, c) => s + Math.max(...c.map((it) => it.hi)) - Math.min(...c.map((it) => it.lo)), 0) + (cols.length - 1) * GAP_COL;
+    const hh = Math.max(...cols.map((c) => c.reduce((s, it) => s + it.h + GAP_ROOT, 0) - GAP_ROOT));
+    // 宽高比偏离的程度（对数，过宽过窄对称）；多一列要明显更好才换
+    const score = Math.abs(Math.log(w / hh / ASPECT)) + 0.05 * k;
+    if (!best || score < best.score) best = { cols, score };
+  }
+  return best?.cols ?? [];
+}
+
+export const widthOf =(depth: number) => (depth === 0 ? 320 : depth === 1 ? 290 : 270);
 
 /**
  * 兄弟节点排序：有关系线相连的兄弟排在一起（沿关系链依次排开），
@@ -195,44 +263,73 @@ export function layoutTree(
     return { r: by("right"), l: by("left"), b: by("bottom") };
   };
 
-  const stackH = (cs: BoardNode[]) => cs.reduce((sum, c) => sum + subtreeH(c.id), 0) + Math.max(0, cs.length - 1) * GAP_Y;
-  /** 节点自己所在的这一行的高度：左右两侧子树里较高的一个 */
-  const midH = (id: string) => {
+  /**
+   * 子树的形状：所有卡片相对该节点左上角的位置和矩形。
+   * 兄弟子树按轮廓贴紧排列：只有横向有交叠的卡片之间才需要留间距，
+   * 所以浅的子树可以塞进深的子树旁边空出来的地方，而不是整块往下排。
+   */
+  const shapeMemo = new Map<string, Shape>();
+  const shape = (id: string): Shape => {
+    const cached = shapeMemo.get(id);
+    if (cached) return cached;
+    const s = size(id);
     const p = parts(id);
-    return Math.max(size(id).h, stackH(p.r), stackH(p.l));
+    const gap = gapAfter(depth.get(id) ?? 0);
+    const out: Shape = { pos: [[id, 0, 0]], rects: [{ x: 0, y: 0, w: s.w, h: s.h }] };
+    const add = (sh: Shape, dx: number, dy: number) => {
+      for (const [cid, x, y] of sh.pos) out.pos.push([cid, x + dx, y + dy]);
+      for (const r of sh.rects) out.rects.push({ x: r.x + dx, y: r.y + dy, w: r.w, h: r.h });
+    };
+    /** 一列兄弟依次往下贴紧；首尾两张卡片的中线对齐父节点的中线 */
+    const column = (cs: BoardNode[], xOf: (c: BoardNode) => number) => {
+      if (!cs.length) return;
+      const acc: Rect[] = [];
+      const placed: { sh: Shape; x: number; y: number }[] = [];
+      for (const c of cs) {
+        const sh = shape(c.id);
+        const x = xOf(c);
+        const y = placed.length ? clearBelow(acc, sh.rects, x, -Infinity) : 0;
+        for (const r of sh.rects) acc.push({ x: r.x + x, y: r.y + y, w: r.w, h: r.h });
+        placed.push({ sh, x, y });
+      }
+      const last = placed[placed.length - 1]!;
+      const dy = s.h / 2 - (last.y + size(cs[cs.length - 1]!.id).h) / 2;
+      for (const q of placed) add(q.sh, q.x, q.y + dy);
+    };
+    column(p.r, () => s.w + gap);
+    column(p.l, (c) => -GAP_X - size(c.id).w);
+    // 下边的节点：贴着父节点往下排，同时避开左右两侧已经排好的子树
+    let floor = s.h + GAP_B;
+    for (const c of p.b) {
+      const sh = shape(c.id);
+      const x = mirror.get(id) ? s.w - INDENT - size(c.id).w : INDENT;
+      const y = clearBelow(out.rects, sh.rects, x, floor);
+      add(sh, x, y);
+      floor = -Infinity;
+    }
+    shapeMemo.set(id, out);
+    return out;
   };
-  const heightMemo = new Map<string, number>();
-  const subtreeH = (id: string): number => {
-    const cached = heightMemo.get(id);
-    if (cached !== undefined) return cached;
-    const b = parts(id).b;
-    const h = midH(id) + (b.length ? GAP_B + stackH(b) : 0);
-    heightMemo.set(id, h);
-    return h;
+  const bounds = (id: string) => {
+    let [top, bottom, left, right] = [Infinity, -Infinity, Infinity, -Infinity];
+    for (const r of shape(id).rects) {
+      top = Math.min(top, r.y);
+      bottom = Math.max(bottom, r.y + r.h);
+      left = Math.min(left, r.x);
+      right = Math.max(right, r.x + r.w);
+    }
+    return { top, h: bottom - top, left, right };
   };
 
   const pos = new Map<string, { x: number; y: number }>();
-  const place = (id: string, x: number, top: number) => {
-    const s = size(id);
-    const p = parts(id);
-    const mid = midH(id);
-    pos.set(id, { x, y: top + (mid - s.h) / 2 });
-    const gap = gapAfter(depth.get(id) ?? 0);
-    let y = top + (mid - stackH(p.r)) / 2;
-    for (const c of p.r) {
-      place(c.id, x + s.w + gap, y);
-      y += subtreeH(c.id) + GAP_Y;
-    }
-    y = top + (mid - stackH(p.l)) / 2;
-    for (const c of p.l) {
-      place(c.id, x - GAP_X - size(c.id).w, y);
-      y += subtreeH(c.id) + GAP_Y;
-    }
-    y = top + mid + GAP_B;
-    for (const c of p.b) {
-      place(c.id, mirror.get(id) ? x + s.w - INDENT - size(c.id).w : x + INDENT, y);
-      y += subtreeH(c.id) + GAP_Y;
-    }
+  /** 把节点（连同子树）的左上角放到 (x, y) */
+  const place = (id: string, x: number, y: number) => {
+    for (const [cid, dx, dy] of shape(id).pos) pos.set(cid, { x: x + dx, y: y + dy });
+  };
+  /** 把整棵子树的上沿放到 top */
+  const placeTop = (id: string, x: number, top: number) => {
+    place(id, x, top - bounds(id).top);
+    return bounds(id).h;
   };
 
   /** 排一片区域（未分组 / 某个分组）里固定位置的节点：保持自己的位置，子树在它右侧展开 */
@@ -240,7 +337,7 @@ export function layoutTree(
     for (const id of visible) {
       const n = byId.get(id)!;
       if (!n.pinned || region.get(id) !== g) continue;
-      place(id, n.x, n.y - (midH(id) - size(id).h) / 2);
+      place(id, n.x, n.y);
     }
   };
 
@@ -254,8 +351,7 @@ export function layoutTree(
     }
     let y = 0;
     for (const r of roots.filter((r) => groupOf(r) === g.id && !r.pinned)) {
-      place(r.id, 0, y);
-      y += subtreeH(r.id) + GAP_ROOT;
+      y += placeTop(r.id, 0, y) + GAP_ROOT;
     }
     placePinned(g.id);
     let [x0, y0, x1, y1] = [0, 0, GROUP_MIN.w, GROUP_MIN.h];
@@ -276,22 +372,41 @@ export function layoutTree(
     });
   }
 
-  // 2. 顶层：没固定的分组和未分组的主题一起从上到下排列，分组当成一整块
+  // 2. 顶层：没固定的分组和未分组的主题按顺序分成几列（先上下、再左右），
+  //    列数让整体宽高比接近屏幕，避免很多棵树叠成一长条；分组当成一整块
   const origin = new Map<string, { x: number; y: number }>();
   const stack = [
     ...roots.filter((r) => !groupOf(r) && !r.pinned).map((r) => ({ key: r.createdAt, root: r, group: undefined })),
     ...groupList.filter((g) => !g.pinned).map((g) => ({ key: g.order, root: undefined, group: g })),
-  ].sort((a, b) => a.key - b.key);
-  let y = 0;
-  for (const item of stack) {
-    if (item.root) {
-      place(item.root.id, 0, y);
-      y += subtreeH(item.root.id) + GAP_ROOT;
-    } else {
+  ]
+    .sort((a, b) => a.key - b.key)
+    .map((item) => {
+      // 锚点：主题是根卡片的左边，分组是框的左边；lo / hi 是相对锚点的左右范围
+      if (item.root) {
+        const b = bounds(item.root.id);
+        return { ...item, lo: b.left, hi: b.right, h: b.h };
+      }
       const r = rel.get(item.group!.id)!;
-      origin.set(item.group!.id, { x: -r.left, y: y - r.top });
-      y += r.h + GAP_ROOT;
+      return { ...item, lo: 0, hi: r.w, h: r.h };
+    });
+  // 顶层有手动固定的卡片或分组时只排一列：它们按绝对坐标摆放，分列会让别的树挪到它们身上
+  const fixed = groupList.some((g) => g.pinned) || visible.some((id) => byId.get(id)!.pinned && !region.has(id));
+  const columns = packColumns(stack, fixed ? 1 : MAX_COLS);
+  let colStart = Math.min(0, ...(columns[0] ?? []).map((it) => it.lo));
+  for (const col of columns) {
+    const lo = Math.min(...col.map((it) => it.lo));
+    const x = colStart - lo;
+    let y = 0;
+    for (const item of col) {
+      if (item.root) {
+        placeTop(item.root.id, x, y);
+      } else {
+        const r = rel.get(item.group!.id)!;
+        origin.set(item.group!.id, { x: x - r.left, y: y - r.top });
+      }
+      y += item.h + GAP_ROOT;
     }
+    colStart = x + Math.max(...col.map((it) => it.hi)) + GAP_COL;
   }
   for (const g of groupList) if (g.pinned) origin.set(g.id, { x: g.x, y: g.y });
   placePinned(undefined);
