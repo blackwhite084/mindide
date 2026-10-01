@@ -9,7 +9,7 @@ const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
 
 function boardName() {
   const root = [...client.state.nodes.values()].find((n) => !n.parentId && !n.draft);
-  return (root?.title || "ai-minder").replace(/[\\/:*?"<>|\s]+/g, "-").slice(0, 40);
+  return (root?.title || "mindide").replace(/[\\/:*?"<>|\s]+/g, "-").slice(0, 40);
 }
 
 function contentNodes() {

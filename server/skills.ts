@@ -16,7 +16,7 @@ export function loadSkills(): LoadedSkill[] {
   const byName = new Map<string, LoadedSkill>();
   for (const dir of DIRS) {
     if (!existsSync(dir)) continue;
-    for (const s of loadSkillsFromDir({ dir, source: "ai-minder" }).skills) {
+    for (const s of loadSkillsFromDir({ dir, source: "mindide" }).skills) {
       try {
         byName.set(s.name, { name: s.name, description: s.description, body: stripFrontmatter(readFileSync(s.filePath, "utf8")).trim() });
       } catch {

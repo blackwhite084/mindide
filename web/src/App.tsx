@@ -68,7 +68,7 @@ function Shell() {
       <header className="topbar">
         <div className="brand">
           <span className={`status-dot ${state.connected ? (state.busy ? "busy" : "ok") : "off"}`} />
-          AI Minder
+          MindIDE
           <span className="brand-sep">/</span>
           <BoardSwitcher state={state} />
           <NewBoardButton />

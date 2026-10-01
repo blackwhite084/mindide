@@ -57,7 +57,7 @@ export function toMarkdown(nodes: BoardNode[], edges: BoardEdge[]): string {
 
 export function toJSON(nodes: BoardNode[], edges: BoardEdge[]): string {
   const data: Fragment & { format: string; version: number; exportedAt: string } = {
-    format: "ai-minder",
+    format: "mindide",
     version: 1,
     exportedAt: new Date().toISOString(),
     nodes: nodes.map(({ id, title, summary, md, parentId, kind, tags, side, subboard, scope }) => ({
@@ -177,7 +177,7 @@ export function fromJSON(text: string): Fragment {
   const data = JSON.parse(text);
   // 兼容：导出文件 / data/board.json（{ board: {...} }）/ 裸 board
   const src = data.board ?? data;
-  if (!Array.isArray(src.nodes)) throw new Error("不是有效的 AI Minder 文件");
+  if (!Array.isArray(src.nodes)) throw new Error("不是有效的 MindIDE 文件");
   return {
     nodes: src.nodes
       .filter((n: any) => n && n.id && !n.draft)

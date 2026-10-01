@@ -1,8 +1,8 @@
-# AI Minder
+# MindIDE
 
 高频 AI 思考板：面向内容的思维导图画布（对话过程在侧栏） + 可排队/插话的对话 + 后台 agent 调度 + 版本分支树。AI 层基于 [pi](https://github.com/badlogic/pi-mono) SDK（`@earendil-works/pi-coding-agent`），模型沿用 `~/.pi/agent` 的配置。
 
-![AI Minder 运行截图](pic.png)
+![MindIDE 运行截图](pic.png)
 
 ```bash
 npm install
@@ -12,7 +12,7 @@ npm run build      # 生产：构建前端
 npm start          # 同一个端口提供页面和接口：http://localhost:5174
 ```
 
-环境变量：`PORT`（默认 5174）、`HOST`（默认 127.0.0.1）、`AI_MINDER_DATA`（数据目录，默认 `<项目>/data`）。
+环境变量：`PORT`（默认 5174）、`HOST`（默认 127.0.0.1）、`MINDIDE_DATA`（数据目录，默认 `<项目>/data`）。
 
 ## 操作
 
